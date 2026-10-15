@@ -32,7 +32,7 @@ struct StoryEditorView: View {
                     FrameThumb(source: model.source(for: cover)).frame(height: 180).clipShape(RoundedRectangle(cornerRadius: 8))
                     Text(cover).font(.caption).foregroundStyle(.secondary)
                 }
-                PhotosPicker(selection: $coverItem, matching: .images, photoLibrary: .shared()) {
+                PhotosPicker(selection: $coverItem, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
                     Label(cover.isEmpty ? "Choose cover photo" : "Replace cover photo", systemImage: "photo.badge.plus")
                 }
                 if model.busy { ProgressView("Reading original…") }
@@ -115,13 +115,13 @@ struct StoryBodyEditor: View {
                 fmt("text.quote", "Quote") { controller.apply { FrameFormat.linePrefix($0, $1, prefix: "> ") } }
                 fmt("link", "Link") { controller.apply { FrameFormat.link($0, $1) } }
                 Divider().frame(height: 24)
-                PhotosPicker(selection: $imageItem, maxSelectionCount: 1, matching: .images, photoLibrary: .shared()) {
+                PhotosPicker(selection: $imageItem, maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
                     BarLabel(icon: "photo", text: "Image")
                 }
-                PhotosPicker(selection: $imagesItems, maxSelectionCount: 3, matching: .images, photoLibrary: .shared()) {
+                PhotosPicker(selection: $imagesItems, maxSelectionCount: 3, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
                     BarLabel(icon: "photo.on.rectangle", text: "2–3 side by side")
                 }
-                PhotosPicker(selection: $clipItem, maxSelectionCount: 1, matching: .videos, photoLibrary: .shared()) {
+                PhotosPicker(selection: $clipItem, maxSelectionCount: 1, matching: .videos, preferredItemEncoding: .current, photoLibrary: .shared()) {
                     BarLabel(icon: "film", text: "Clip")
                 }
                 Button { showYouTube = true } label: { BarLabel(icon: "play.rectangle", text: "YouTube") }

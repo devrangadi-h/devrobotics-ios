@@ -55,13 +55,14 @@ struct FrameThumb: View {
     var fill = true
     @Environment(SettingsStore.self) private var settings
     @State private var image: UIImage?
+    @State private var failed = false
 
     var body: some View {
         ZStack {
             Color(.secondarySystemBackground)
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: fill ? .fill : .fit)
-            } else if source != nil {
+            } else if source != nil && !failed {
                 ProgressView()
             } else {
                 Image(systemName: "photo").foregroundStyle(.secondary)
@@ -72,8 +73,10 @@ struct FrameThumb: View {
     }
 
     private func load() async {
+        failed = false
         guard let source else { image = nil; return }
         image = await ThumbLoading.image(source, settings: settings)
+        failed = image == nil
     }
 }
 

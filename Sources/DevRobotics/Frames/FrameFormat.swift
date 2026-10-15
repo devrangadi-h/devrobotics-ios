@@ -168,7 +168,8 @@ enum FrameFormat {
     /// Insert `block` on its own line, separated from neighbours by blank lines.
     static func insertBlock(_ text: String, _ sel: NSRange, block: String) -> Edit {
         let ns = text as NSString
-        let sel = clamp(sel, ns.length)
+        var sel = clamp(sel, ns.length)
+        sel = NSRange(location: sel.location + sel.length, length: 0)  // never replace the selection
         let before = ns.substring(to: sel.location)
         let after = ns.substring(from: sel.location + sel.length)
         let pre: String = before.isEmpty ? "" : before.hasSuffix("\n\n") ? "" : before.hasSuffix("\n") ? "\n" : "\n\n"

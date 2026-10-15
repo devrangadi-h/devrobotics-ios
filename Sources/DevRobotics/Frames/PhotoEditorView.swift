@@ -13,7 +13,7 @@ struct PhotoEditorView: View {
                         .listRowInsets(EdgeInsets())
                     Text("Tap the photo to set where the square crop is centred.").font(.caption).foregroundStyle(.secondary)
                 }
-                PhotosPicker(selection: $item, matching: .images, photoLibrary: .shared()) {
+                PhotosPicker(selection: $item, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
                     Label(model.draft.thumbName == nil ? "Choose photo" : "Replace photo", systemImage: "photo.badge.plus")
                 }
                 if model.busy { ProgressView("Reading original…") }

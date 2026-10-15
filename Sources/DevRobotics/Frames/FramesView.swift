@@ -78,6 +78,7 @@ struct FramesView: View {
     }
 
     private func open(_ row: FrameRow) {
+        guard !model.sending else { return }
         path.append(EditTarget(kind: row.kind, slug: row.slug, draft: row.draft))
     }
 
