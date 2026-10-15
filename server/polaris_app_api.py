@@ -839,7 +839,7 @@ def parse_issues(lines, slug):
                 kind = "marker"
         if name is None and mine and file != "story.md":
             name = file
-        issue = {"level": level, "line": int(line) if line else None, "file": file, "message": msg, "kind": kind}
+        issue = {"level": level, "line": int(line) if (line and mine) else None, "file": file, "message": msg, "kind": kind}
         if name:
             issue["name"] = name
         out.append(issue)
@@ -877,7 +877,8 @@ def _build_draft(job, req):
         real = INBOX / sub
         if real.is_dir():
             for e in real.iterdir():
-                if e.name != slug:
+                # only the story being edited is replaced; a same-named photo must still collide
+                if not (sub == "stories" and e.name == slug):
                     (inbox / sub / e.name).symlink_to(e)
     folder = inbox / "stories" / slug
     folder.mkdir()
