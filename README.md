@@ -25,4 +25,4 @@ Free Apple IDs expire after 7 days; re-run `xtool dev` to reinstall.
 
 ## Fonts
 
-Inter and JetBrains Mono are bundled under the SIL Open Font License 1.1.
+Inter and JetBrains Mono are bundled under the SIL Open Font License 1.1; see `LICENSES/`.
