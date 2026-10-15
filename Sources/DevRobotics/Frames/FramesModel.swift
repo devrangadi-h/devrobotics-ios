@@ -102,12 +102,21 @@ final class FramesModel {
                 return
             }
         }
-        if let d = row.draft { store.delete(d.id) }
+        if let d = row.draft { store.delete(d.id); releasePreview(d.id, settings) }
         entries.removeAll { $0.kind == row.kind && $0.slug == row.slug }
         await refresh(settings)
     }
 
-    func discardDraft(_ d: FrameDraft) { store.delete(d.id) }
+    func discardDraft(_ d: FrameDraft, _ settings: SettingsStore) {
+        store.delete(d.id)
+        releasePreview(d.id, settings)
+    }
+
+    /// Best effort: free the draft's real-page preview folder on the Pi (it also expires and is purged on its own).
+    private func releasePreview(_ id: UUID, _ settings: SettingsStore) {
+        let path = "v1/frames/draft-preview/\(id.uuidString.lowercased())"
+        Task { _ = try? await FramesAuth.data(settings, path, method: "DELETE") }
+    }
 
     static func describe(_ error: Error) -> String {
         if let e = error as? LocalizedError, let d = e.errorDescription { return d }
@@ -194,6 +203,7 @@ final class FramesModel {
             d.problems = result.valid == false ? (result.problems ?? ["Server reported problems."]) : []
             statusText[id] = nil; progress[id] = nil
             if d.problems.isEmpty { store.delete(id) } else { store.save(d) }
+            releasePreview(id, settings)
             return true
         } catch {
             return fail(Self.describe(error))

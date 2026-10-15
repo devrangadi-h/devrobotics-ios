@@ -33,7 +33,7 @@ struct FramesView: View {
                         .swipeActions {
                             Button("Delete", role: .destructive) { toDelete = row }
                             if let d = row.draft, !d.dirty {
-                                Button("Dismiss") { model.discardDraft(d) }.tint(.gray)
+                                Button("Dismiss") { model.discardDraft(d, settings) }.tint(.gray)
                             }
                         }
                 }
