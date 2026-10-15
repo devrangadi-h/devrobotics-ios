@@ -14,7 +14,7 @@ struct BlockDetailsSheet: View {
                         TextField("https://youtu.be/…", text: $block.url)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         if !block.url.isEmpty && !FrameFormat.isYouTubeURL(block.url) {
-                            Text("Use a youtu.be, youtube.com/watch or shorts link.").font(.caption).foregroundStyle(.red)
+                            Text("Use a youtu.be, youtube.com/watch or shorts link.").font(.caption).foregroundStyle(Theme.danger)
                         }
                     }
                     Section("Title (optional)") { TextField("Title", text: $block.title) }
@@ -61,7 +61,7 @@ struct YouTubeSheet: View {
                     TextField("https://youtu.be/…", text: $url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     if !url.isEmpty && !FrameFormat.isYouTubeURL(url) {
-                        Text("Use a youtu.be, youtube.com/watch or shorts link.").font(.caption).foregroundStyle(.red)
+                        Text("Use a youtu.be, youtube.com/watch or shorts link.").font(.caption).foregroundStyle(Theme.danger)
                     }
                 }
                 Section("Title (optional)") { TextField("Title", text: $title) }

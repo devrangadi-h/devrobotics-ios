@@ -23,7 +23,7 @@ struct ProblemsPill: View {
                     .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
                     .padding(.horizontal, DS.Space.m)
                     .padding(.vertical, 7)
-                    .glassEffect(.regular.tint((hasError ? Color.red : Theme.warn).opacity(0.5)).interactive(), in: .capsule)
+                    .glassEffect(.regular.tint((hasError ? Theme.danger : Theme.warn).opacity(0.5)).interactive(), in: .capsule)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Problems: \(problems.summaryText)")
@@ -82,7 +82,7 @@ struct ProblemsSheet: View {
             Button { onSelect(p) } label: {
                 HStack(alignment: .top, spacing: DS.Space.m) {
                     Image(systemName: isError ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(isError ? Color.red : Theme.warn)
+                        .foregroundStyle(isError ? Theme.danger : Theme.warn)
                         .font(.system(size: 18))
                         .accessibilityLabel(isError ? "Error" : "Warning")
                     VStack(alignment: .leading, spacing: 2) {

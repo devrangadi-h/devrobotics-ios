@@ -53,7 +53,7 @@ struct AddMenu<Label: View>: View {
 struct IssueBadge: View {
     let issue: PreviewIssue
     var body: some View {
-        let tint = issue.level == .error ? Color.red : Theme.warn
+        let tint = issue.level == .error ? Theme.danger : Theme.warn
         Label(issue.message, systemImage: issue.level == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
             .font(Theme.font(13, weight: .medium, relativeTo: .footnote))
             .foregroundStyle(tint)
@@ -81,7 +81,7 @@ struct ProblemBadge: View {
 
     var body: some View {
         let err = problem.severity == .error
-        let tint = err ? Color.red : Theme.warn
+        let tint = err ? Theme.danger : Theme.warn
         VStack(alignment: .leading, spacing: 4) {
             Label(problem.title, systemImage: err ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
                 .font(Theme.font(13, weight: .medium, relativeTo: .footnote))
@@ -236,9 +236,9 @@ struct MediaCard: View {
                             }
                     } else {
                         Label("\(it.name) missing", systemImage: "exclamationmark.triangle")
-                            .font(.caption).foregroundStyle(.red)
+                            .font(.caption).foregroundStyle(Theme.danger)
                             .frame(maxWidth: .infinity, minHeight: 100)
-                            .background(Color.red.opacity(0.1))
+                            .background(Theme.danger.opacity(0.1))
                     }
                 }
             }

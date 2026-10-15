@@ -635,7 +635,7 @@ struct StoryPreview: View {
                         if model.draft.allFiles.contains(n) {
                             FrameThumb(source: model.source(for: n)).frame(height: 160).clipShape(RoundedRectangle(cornerRadius: DS.Radius.chip, style: .continuous))
                         } else {
-                            Label("\(n) missing", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
+                            Label("\(n) missing", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Theme.danger)
                         }
                     }
                 }

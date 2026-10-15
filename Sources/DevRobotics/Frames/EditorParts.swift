@@ -13,7 +13,7 @@ struct SlugRow: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .font(.system(.body, design: .monospaced))
                 if !model.draft.slug.isEmpty && !FrameFormat.isValidSlug(model.draft.slug) {
-                    Text("Lowercase letters, digits and single hyphens only.").font(.caption).foregroundStyle(.red)
+                    Text("Lowercase letters, digits and single hyphens only.").font(.caption).foregroundStyle(Theme.danger)
                 } else {
                     Text("Becomes the link. Can't be changed after publishing.").font(.caption).foregroundStyle(.secondary)
                 }
@@ -95,7 +95,7 @@ struct ProblemsView: View {
     let draft: FrameDraft
     var body: some View {
         if let e = draft.lastError {
-            Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
+            Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger).font(.callout)
         }
         ForEach(draft.problems, id: \.self) { p in
             Label(p, systemImage: "exclamationmark.circle").foregroundStyle(.orange).font(.callout)

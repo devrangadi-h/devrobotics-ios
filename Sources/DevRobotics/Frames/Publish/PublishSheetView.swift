@@ -217,7 +217,7 @@ struct PublishView: View {
     private func failed(_ msg: String, _ log: [String]) -> some View {
         ScrollView {
             VStack(spacing: DS.Space.l) {
-                PublishStateMark(icon: "xmark.octagon.fill", tint: .red, wiggle: true)
+                PublishStateMark(icon: "xmark.octagon.fill", tint: Theme.danger, wiggle: true)
                     .padding(.top, DS.Space.xl)
                 Text("Something went wrong").font(Theme.font(22, weight: .semibold, relativeTo: .title2))
                 Text(msg).font(Theme.font(15, relativeTo: .subheadline)).multilineTextAlignment(.center)
@@ -237,7 +237,7 @@ struct PublishView: View {
     }
 
     private static func tint(_ k: FrameChange.Kind) -> Color {
-        switch k { case .new: return Theme.ok; case .changed: return Theme.accent; case .removed: return .red }
+        switch k { case .new: return Theme.ok; case .changed: return Theme.accent; case .removed: return Theme.danger }
     }
     private static func icon(_ k: FrameChange.Kind) -> String {
         switch k { case .new: return "plus.circle.fill"; case .changed: return "pencil.circle.fill"; case .removed: return "minus.circle.fill" }

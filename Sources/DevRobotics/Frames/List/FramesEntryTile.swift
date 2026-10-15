@@ -55,7 +55,7 @@ struct FramesEntryTile: View {
     }
 
     private func tint(_ b: Badge) -> Color? {
-        b.red ? .red.opacity(0.6) : b.orange ? .orange.opacity(0.55) : b.green ? .green.opacity(0.5) : nil
+        b.red ? Theme.danger.opacity(0.6) : b.orange ? .orange.opacity(0.55) : b.green ? .green.opacity(0.5) : nil
     }
 
     private var pills: some View {

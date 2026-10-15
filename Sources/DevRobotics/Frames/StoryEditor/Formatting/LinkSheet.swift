@@ -33,7 +33,7 @@ struct LinkSheet: View {
                     TextField("https://…", text: $url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         .onChange(of: url) { _, _ in touched = true }
-                    if let error { Text(error).font(.caption).foregroundStyle(.red) }
+                    if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
                 }
                 if isEditing {
                     Section {
