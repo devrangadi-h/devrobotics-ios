@@ -98,9 +98,9 @@ enum FrameFormat {
         "<insert image \(name)\(note(n))\(attr("alt", alt))\(attr("place", place))\(full ? " full" : "")>"
     }
 
-    static func imagesMarker(_ items: [(name: String, note: String?)], alt: String? = nil) -> String {
-        let parts = items.map { "\($0.name)\(note($0.note))" }.joined(separator: " ")
-        return "<insert images \(parts)\(attr("alt", alt))>"
+    static func imagesMarker(_ items: [(name: String, note: String?, alt: String?)]) -> String {
+        let parts = items.map { "\($0.name)\(note($0.note))\(attr("alt", $0.alt))" }.joined(separator: " ")
+        return "<insert images \(parts)>"
     }
 
     static func clipMarker(name: String, note n: String? = nil) -> String {

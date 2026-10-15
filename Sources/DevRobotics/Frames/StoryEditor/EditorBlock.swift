@@ -5,7 +5,7 @@ import Foundation
 struct EditorBlock: Identifiable, Equatable {
     enum Media: Equatable { case image, images, clip, youtube }
     enum TextKind: Equatable { case paragraph, heading, bullets, numbered, quote }
-    struct Item: Equatable { var name: String; var note: String }
+    struct Item: Equatable { var name: String; var note: String; var alt = "" }
 
     let id: UUID
     /// nil = text block (the Markdown source of the block lives in `text`).
@@ -48,7 +48,7 @@ struct EditorBlock: Identifiable, Equatable {
             let i = items.first ?? Item(name: "", note: "")
             return StoryBlock(id: id, kind: .image(name: i.name, note: i.note, alt: alt, place: place, full: full))
         case .images:
-            return StoryBlock(id: id, kind: .images(items: items.map { StoryBlock.Item(name: $0.name, note: $0.note) }, alt: alt))
+            return StoryBlock(id: id, kind: .images(items: items.map { StoryBlock.Item(name: $0.name, note: $0.note, alt: $0.alt) }))
         case .clip:
             let i = items.first ?? Item(name: "", note: "")
             return StoryBlock(id: id, kind: .clip(name: i.name, note: i.note))
@@ -74,10 +74,9 @@ struct EditorBlock: Identifiable, Equatable {
             media = .image
             items = [Item(name: n, note: note)]
             self.alt = alt; self.place = place; self.full = full
-        case .images(let its, let alt):
+        case .images(let its):
             media = .images
-            items = its.map { Item(name: $0.name, note: $0.note) }
-            self.alt = alt
+            items = its.map { Item(name: $0.name, note: $0.note, alt: $0.alt) }
         case .clip(let n, let note):
             media = .clip
             items = [Item(name: n, note: note)]

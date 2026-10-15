@@ -22,18 +22,19 @@ struct BlockDetailsSheet: View {
                     ForEach(block.items.indices, id: \.self) { i in
                         Section(block.items[i].name) {
                             TextField("Note (shown under it)", text: $block.items[i].note, axis: .vertical)
+                            if block.media == .images {
+                                TextField("Alt text", text: $block.items[i].alt, axis: .vertical)
+                            }
                             if FrameFormat.isImage(block.items[i].name), block.items[i].name != model.draft.field("cover") {
                                 Button("Use as cover photo") { model.draft.fields["cover"] = block.items[i].name }
                             }
                         }
                     }
-                    if block.media != .clip {
+                    if block.media == .image {
                         Section {
                             TextField("Alt text", text: $block.alt, axis: .vertical)
-                            if block.media == .image {
-                                TextField("Place (if different from the story)", text: $block.place)
-                                Toggle("Full-bleed (edge to edge)", isOn: $block.full)
-                            }
+                            TextField("Place (if different from the story)", text: $block.place)
+                            Toggle("Full-bleed (edge to edge)", isOn: $block.full)
                         }
                     }
                 }
