@@ -52,7 +52,10 @@ struct PhotoEditorView: View {
             if problems { Section("Problems") { ProblemsView(draft: model.draft) } }
             Section("Before sending") {
                 let v = model.draft.validation
-                if v.isEmpty {
+                if v.isEmpty && !model.draft.dirty {
+                    // Opened from the Pi and not edited yet: nothing is queued for sending.
+                    Label("No changes to send", systemImage: "equal.circle").foregroundStyle(.secondary)
+                } else if v.isEmpty {
                     Label("Ready to send", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.ok)
                         .symbolEffect(.bounce, value: v.isEmpty)
                 } else {
