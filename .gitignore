@@ -11,3 +11,6 @@ DerivedData/
 /.claude/
 __pycache__/
 *.pyc
+
+# Written by Tools/install.sh
+Sources/DevRobotics/Resources/BuildStamp.json

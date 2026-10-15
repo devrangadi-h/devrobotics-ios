@@ -18,6 +18,7 @@ enum DemoMode {
 
     /// Call once at launch (before any request).
     static func installIfNeeded() {
+        LaunchStats.record()
         guard isOn else { return }
         URLProtocol.registerClass(DemoURLProtocol.self)
     }
@@ -122,6 +123,7 @@ final class DemoURLProtocol: URLProtocol {
             "memory": ["usedBytes": 4_300_000_000, "totalBytes": 16_600_000_000],
             "disk": ["usedBytes": 16_900_000_000, "totalBytes": 123_000_000_000],
             "uptimeSeconds": 9 * 86400 + 5 * 3600 + 1260,
+            "kernel": "6.12.47+rpt-rpi-2712", "serverVersion": "0.4.2",
             "history": history,
             "services": [["name": "lights-api", "state": "active"], ["name": "polaris-app-api", "state": "active"],
                          ["name": "flower-tracker", "state": "inactive"], ["name": "local-chat-ui", "state": "active"]],
@@ -185,5 +187,32 @@ final class DemoURLProtocol: URLProtocol {
             ctx.cgContext.drawLinearGradient(g, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
         }
         return img.jpegData(compressionQuality: 0.8) ?? Data()
+    }
+}
+
+/// Fake values for `-demo -screen about`.
+enum AboutDemo {
+    static var expiry: ExpiryInfo {
+        let exp = Date().addingTimeInterval(6 * 86400 + 4 * 3600)
+        return ExpiryInfo(expires: exp, created: exp.addingTimeInterval(-ExpiryMath.lifetime), estimated: false,
+                          profile: ProvisioningProfile(expiration: exp, creation: nil, teamName: "Demo Developer",
+                                                       teamID: "ABCDE12345", deviceCount: 1))
+    }
+    static let latencies = [42, 38, 47]
+    static let draftBytes: Int64 = 18_400_000
+    static let thumbBytes: Int64 = 6_900_000
+    static let appBytes: Int64 = 14_200_000
+    static let freeBytes: Int64 = 58_000_000_000
+    static let launchCount = 23
+    static let firstInstall = Date().addingTimeInterval(-9 * 86400)
+    static func deviceGroup(free: String) -> AboutModel.Group {
+        AboutModel.Group(title: "Device", rows: [
+            .init(label: "Model", value: "iPhone18,1", symbol: "iphone"),
+            .init(label: "iOS", value: "26.5", symbol: "apple.logo"),
+            .init(label: "Free storage", value: free, symbol: "externaldrive"),
+            .init(label: "Battery", value: "81% · unplugged", symbol: "battery.75percent"),
+            .init(label: "Low Power Mode", value: "off", symbol: "bolt.badge.clock"),
+            .init(label: "Thermal state", value: "nominal", symbol: "thermometer.medium"),
+        ])
     }
 }

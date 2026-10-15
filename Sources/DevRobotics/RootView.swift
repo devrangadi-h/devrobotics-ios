@@ -9,7 +9,7 @@ struct RootView: View {
         switch DemoMode.screen {
         case "lights": return .lights
         case "frames", "story", "photo", "publish", "storyproblems": return .frames
-        case "settings": return .settings
+        case "settings", "about": return .settings
         default: return SettingsStore.storedLaunchTab
         }
     }

@@ -41,12 +41,17 @@ struct SettingsView: View {
     @State private var clearing = false
     @State private var confirmClear = false
     @State private var clearedTick = 0
+    @State private var showAbout = false
 
     var body: some View {
         @Bindable var s = settings
         NavigationStack {
             Form {
-                Section { SettingsHeaderCard(connected: result?.ok == true) }
+                Section {
+                    Button { showAbout = true } label: { SettingsHeaderCard(connected: result?.ok == true) }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens About DevRobotics")
+                }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
 
@@ -129,6 +134,8 @@ struct SettingsView: View {
             .font(Theme.font(16))
             .dsPage()
             .navigationTitle("Settings")
+            .navigationDestination(isPresented: $showAbout) { AboutView() }
+            .onAppear { if DemoMode.screen == "about" { showAbout = true } }
             .task(id: settings.isConfigured) { await loadCache() }
             .refreshable { await loadCache() }
         }
@@ -263,6 +270,7 @@ struct SettingsView: View {
 private struct SettingsHeaderCard: View {
     var connected: Bool
     @Environment(SettingsStore.self) private var settings
+    @State private var expiry = ExpiryInfo.current()
 
     var body: some View {
         GlassCard {
@@ -275,13 +283,19 @@ private struct SettingsHeaderCard: View {
                         LinearGradient(colors: [Theme.accent, Theme.accentStrong], startPoint: .topLeading, endPoint: .bottomTrailing),
                         in: .rect(cornerRadius: 14))
                 VStack(alignment: .leading, spacing: DS.Space.xs) {
-                    Text("DevRobotics").font(Theme.font(20, weight: .semibold, relativeTo: .title3))
+                    Text("DevRobotics").font(Theme.font(20, weight: .semibold, relativeTo: .title3)).lineLimit(1)
                     Text(settings.isConfigured ? settings.host : "Not configured")
                         .font(Theme.font(13, mono: true, relativeTo: .footnote))
                         .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    let rem = expiry.remaining()
+                    let lvl = ExpiryMath.level(remaining: rem)
+                    GlassPill(text: ExpiryMath.chipText(rem), systemImage: lvl == .ok ? "clock" : "exclamationmark.triangle",
+                              tint: lvl == .ok ? nil : (lvl == .soon ? Theme.warn : Color.red).opacity(0.4))
+                        .fixedSize()
                 }
                 Spacer(minLength: 0)
-                if connected { GlassPill(text: "Online", systemImage: "checkmark", tint: Theme.ok.opacity(0.4)) }
+                if connected { GlassPill(text: "Online", systemImage: "checkmark", tint: Theme.ok.opacity(0.4)).fixedSize() }
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, DS.Space.xs)
