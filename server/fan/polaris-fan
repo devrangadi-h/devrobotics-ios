@@ -1,0 +1,179 @@
+#!/usr/bin/python3 -I
+"""polaris-fan: root helper that sets the Raspberry Pi 5 fan. Install to /usr/local/sbin/polaris-fan (root:root 0755).
+
+Usage (nothing else is accepted):
+  polaris-fan status             print JSON {pwm, enable, rpm, tempC, zoneEnabled, ...}
+  polaris-fan auto               give the fan back to the kernel thermal governor (the normal state)
+  polaris-fan set <0-255> [sec]  hold a fixed duty cycle; reverts to auto by itself after sec (default 1800, max 7200)
+  polaris-fan max [sec]          hold 255; reverts to auto after sec (default 900, max 7200)
+
+How the Pi 5 fan works on this kernel (6.12 rpi, driver pwm-fan; verified by experiment, see README):
+  pwm1_enable 0 = fan off (pwm1 writes ignored), 1 = duty from pwm1, 2 = same as 1 in practice (thermal governor only).
+  The step_wise thermal governor pulls pwm1 down one cooling state every ~2 s even in mode 1, so a manual value only
+  sticks while thermal_zone0/mode is "disabled". Hence: "set"/"max" disable the zone and write pwm1; "auto" re-enables
+  the zone (the governor then ramps the fan to what the temperature needs). pwm1_enable is always left at 1 (the boot
+  default, which is also what "automatic" looked like originally).
+
+Safety enforced here as well as in the web service: temp >= 75 C -> automatic; > 65 C -> at least 50 %; > 50 C -> never
+below ~30 %; unreadable temperature -> automatic. Every hold has a root-owned systemd timer that runs "auto" again, so
+a dead web service can never leave the fan forced.
+"""
+import fcntl
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+ZONE = "/sys/class/thermal/thermal_zone0"
+COOLING = "/sys/class/thermal/cooling_device0"
+LOCK = "/run/polaris-fan.lock"
+DEADMAN = "polaris-fan-deadman"
+FORCE_AUTO_C, FLOOR_C, FLOOR_PWM, NONZERO_C, MIN_PWM = 75.0, 65.0, 128, 50.0, 76
+DEFAULT_SET_S, DEFAULT_MAX_S, LIMIT_S = 1800, 900, 7200
+USAGE = "usage: status | auto | set <0-255> [seconds] | max [seconds]"
+
+
+def fail(msg, code=2):
+    print(json.dumps({"ok": False, "error": msg}))
+    sys.exit(code)
+
+
+def hwmon():
+    for d in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
+        try:
+            if open(d + "/name").read().strip() == "pwmfan":
+                return d
+        except OSError:
+            continue
+    fail("no pwmfan hwmon device", 3)
+
+
+def rd(path):
+    with open(path) as f:
+        return f.read().strip()
+
+
+def wr(path, value):
+    with open(path, "w") as f:
+        f.write(str(value))
+
+
+def temp_c():
+    try:
+        return int(rd(ZONE + "/temp")) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+def status():
+    h = hwmon()
+    out = {"ok": True, "pwm": int(rd(h + "/pwm1")), "enable": int(rd(h + "/pwm1_enable")),
+           "rpm": int(rd(h + "/fan1_input")), "tempC": temp_c(),
+           "zoneEnabled": rd(ZONE + "/mode") == "enabled"}
+    try:
+        out["coolingState"] = int(rd(COOLING + "/cur_state"))
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def systemctl(*args):
+    subprocess.run(["/usr/bin/systemctl", *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def cancel_deadman():
+    systemctl("stop", DEADMAN + ".timer")
+
+
+def arm_deadman(seconds):
+    cancel_deadman()
+    systemctl("reset-failed", DEADMAN + ".service")
+    r = subprocess.run(["/usr/bin/systemd-run", "--quiet", "--collect", f"--unit={DEADMAN}",
+                        f"--on-active={int(seconds)}s", "/usr/local/sbin/polaris-fan", "auto"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return r.returncode == 0
+
+
+TRIPS_C = (50.0, 60.0, 67.5, 75.0)  # thermal_zone0 active trips -> cooling states 1..4
+
+
+def go_auto():
+    """Hand the fan back to the governor, starting from the state the temperature calls for (not the held value)."""
+    h = hwmon()
+    t = temp_c()
+    state = 4 if t is None else sum(1 for x in TRIPS_C if t >= x)
+    try:
+        wr(COOLING + "/cur_state", state)
+    except OSError:
+        pass
+    wr(ZONE + "/mode", "enabled")
+    wr(h + "/pwm1_enable", 1)
+
+
+def hold(pwm, seconds):
+    t = temp_c()
+    if t is None or t >= FORCE_AUTO_C:
+        cancel_deadman()
+        go_auto()
+        print(json.dumps({**status(), "ok": False, "error": "too hot or temperature unreadable; automatic",
+                          "forcedAuto": True}))
+        sys.exit(6)
+    applied = pwm
+    if t > FLOOR_C:
+        applied = max(applied, FLOOR_PWM)
+    elif t > NONZERO_C:
+        applied = max(applied, MIN_PWM)
+    h = hwmon()
+    try:
+        wr(ZONE + "/mode", "disabled")
+        wr(h + "/pwm1_enable", 1)
+        wr(h + "/pwm1", applied)
+        if not arm_deadman(seconds):
+            raise OSError("could not arm the revert timer")
+    except Exception as e:  # never leave it forced
+        try:
+            go_auto()
+        except Exception:
+            pass
+        fail(f"set failed, reverted to automatic: {e}", 1)
+    return {**status(), "requested": pwm, "applied": applied, "revertAfterSeconds": seconds}
+
+
+def uint(s, lo, hi, what):
+    if not re.fullmatch(r"[0-9]{1,4}", s or ""):
+        fail(f"bad {what}")
+    v = int(s)
+    if not lo <= v <= hi:
+        fail(f"{what} out of range")
+    return v
+
+
+def main(argv):
+    if os.geteuid() != 0:
+        fail("must run as root", 4)
+    if len(argv) < 2:
+        fail(USAGE)
+    cmd, args = argv[1], argv[2:]
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    if cmd == "status" and not args:
+        res = status()
+    elif cmd == "auto" and not args:
+        cancel_deadman()
+        go_auto()
+        res = status()
+    elif cmd == "set" and len(args) in (1, 2):
+        res = hold(uint(args[0], 0, 255, "pwm"),
+                   uint(args[1], 1, LIMIT_S, "seconds") if len(args) == 2 else DEFAULT_SET_S)
+    elif cmd == "max" and len(args) in (0, 1):
+        res = hold(255, uint(args[0], 1, LIMIT_S, "seconds") if args else DEFAULT_MAX_S)
+    else:
+        fail(USAGE)
+    print(json.dumps(res))
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main(sys.argv)

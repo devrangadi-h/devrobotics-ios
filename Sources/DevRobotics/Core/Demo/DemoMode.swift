@@ -31,7 +31,7 @@ final class DemoURLProtocol: URLProtocol {
 
     override func startLoading() {
         guard let url = request.url else { return }
-        let (status, type, data) = Self.respond(path: url.path, method: request.httpMethod ?? "GET")
+        let (status, type, data) = Self.respond(path: url.path, method: request.httpMethod ?? "GET", body: Self.bodyData(request))
         let resp = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
                                    headerFields: ["Content-Type": type])!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
@@ -45,9 +45,10 @@ final class DemoURLProtocol: URLProtocol {
         (status, "application/json", (try? JSONSerialization.data(withJSONObject: obj)) ?? Data())
     }
 
-    static func respond(path: String, method: String) -> (Int, String, Data) {
+    static func respond(path: String, method: String, body: Data? = nil) -> (Int, String, Data) {
         let parts = path.split(separator: "/").map(String.init)
         switch path {
+        case "/v1/fan": return fan(method: method, body: body)
         case "/v1/status": return json(status())
         case "/v1/cache", "/v1/cache/clear":
             return json(["usedBytes": 61_000_000, "capBytes": 2_147_483_648, "draftCount": 0,
@@ -82,6 +83,41 @@ final class DemoURLProtocol: URLProtocol {
     }
 
     // MARK: fixtures (fake)
+
+    /// Fan fixture. `-fan max|manual` (launch argument) picks the starting mode; POST /v1/fan changes it.
+    nonisolated(unsafe) private static var fanMode: String = {
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-fan"), i + 1 < a.count { return a[i + 1] }
+        return "auto"
+    }()
+    nonisolated(unsafe) private static var fanPercent = 40
+    nonisolated(unsafe) private static var fanEnds = Date().addingTimeInterval(14 * 60 + 32)
+
+    private static func bodyData(_ r: URLRequest) -> Data? {
+        if let b = r.httpBody { return b }
+        guard let s = r.httpBodyStream else { return nil }
+        s.open(); defer { s.close() }
+        var out = Data(); var buf = [UInt8](repeating: 0, count: 1024)
+        while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n <= 0 { break }; out.append(buf, count: n) }
+        return out
+    }
+
+    private static func fan(method: String, body: Data?) -> (Int, String, Data) {
+        if method == "POST", let b = body, let o = try? JSONSerialization.jsonObject(with: b) as? [String: Any],
+           let mode = o["mode"] as? String {
+            fanMode = mode
+            if mode == "manual" { fanPercent = (o["percent"] as? Int) ?? 40; fanEnds = Date().addingTimeInterval(30 * 60) }
+            if mode == "max" { fanEnds = Date().addingTimeInterval(15 * 60) }
+        }
+        let t = Date().timeIntervalSince1970
+        let pct = fanMode == "max" ? 100 : (fanMode == "manual" ? fanPercent : 0)
+        let wobble = Int(t) % 7 * 9
+        return json(["available": true, "mode": fanMode, "percent": pct,
+                     "rpm": fanMode == "auto" ? 0 : pct * 72 + wobble,
+                     "tempC": 48.6 + Double(Int(t) % 5) * 0.2,
+                     "revertsAt": fanMode == "auto" ? NSNull() : Int(fanEnds.timeIntervalSince1970) as Any,
+                     "minPercent": NSNull()])
+    }
 
     /// A finished draft-preview job that failed with typical pipeline issues (used by `-screen storyproblems`).
     private static func problemsJob() -> [String: Any] {

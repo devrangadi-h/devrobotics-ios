@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -40,6 +41,7 @@ CACHE_CAP = int(os.environ.get("APP_CACHE_CAP_BYTES", 2 * 1024 ** 3))
 THUMBS_CAP = int(os.environ.get("APP_THUMBS_CAP_BYTES", 512 * 1024 ** 2))
 MAX_DRAFTS = int(os.environ.get("APP_MAX_DRAFTS", "3"))
 DRAFT_TTL = int(os.environ.get("APP_DRAFT_TTL_SECONDS", str(24 * 3600)))
+SERVER_VERSION = "polaris-app-api 1.1.0"
 SERVICES = ["lights-api.service", "local-chat-ui.service", "flower-tracker.timer", "polaris-app-api.service"]
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -397,7 +399,215 @@ def status():
         "lastPublish": last_pub,
         "lastLog": last_log,
         "busy": BUSY.locked(),
+        "kernel": os.uname().release,
+        "serverVersion": SERVER_VERSION,
     })
+
+
+# ---------- fan ----------
+# The root helper does the writing (sudoers allows only that one command). All safety rules live HERE and again in the
+# helper. An override is: mode manual|max + an end time. A watchdog thread ends it on time, ends Max early when the Pi
+# has been cool, and re-applies it every FAN_REAPPLY_S; the helper has its own root timer as a last resort.
+
+FAN_HELPER = os.environ.get("FAN_HELPER", "/usr/local/sbin/polaris-fan")
+FAN_MINUTE = float(os.environ.get("FAN_TEST_SECONDS_PER_MINUTE", "60"))   # test hook; 60 in production
+FAN_TEMP_FILE = os.environ.get("FAN_TEST_TEMP_FILE", "")                  # test hook; unset in production
+FAN_COOL_S = float(os.environ.get("FAN_TEST_COOL_SECONDS", "30"))          # Max ends after this long below 50 C
+FAN_TICK_S = float(os.environ.get("FAN_TEST_TICK_SECONDS", "1"))
+FAN_REAPPLY_S = float(os.environ.get("FAN_TEST_REAPPLY_SECONDS", "10"))
+FAN_FORCE_AUTO_C, FAN_FLOOR_C, FAN_NONZERO_C = 75.0, 65.0, 50.0
+FAN_FLOOR_PCT, FAN_NONZERO_PCT = 50, 30
+FAN_DEFAULT_MIN = {"manual": 30, "max": 15}
+FAN_LOCK = threading.RLock()
+FAN = {"mode": "auto", "percent": None, "until": None, "cool_since": None, "applied_at": 0.0}
+
+
+def fan_log(msg):
+    print(f"fan: {msg}", file=sys.stderr, flush=True)
+
+
+def fan_hwmon():
+    for d in sorted(Path("/sys/class/hwmon").glob("hwmon*")):
+        if read_text(d / "name").strip() == "pwmfan":
+            return d
+    return None
+
+
+def fan_temp():
+    if FAN_TEMP_FILE:
+        try:
+            return float(Path(FAN_TEMP_FILE).read_text().strip())
+        except (OSError, ValueError):
+            return None
+    t = read_text("/sys/class/thermal/thermal_zone0/temp").strip()
+    return int(t) / 1000 if t.isdigit() else None
+
+
+def fan_pwm_for(percent):
+    return int(percent * 255 / 100 + 0.5)
+
+
+def fan_min_percent(temp):
+    """Minimum fan percent allowed at this temperature; None means 'must be automatic' (hot or unreadable)."""
+    if temp is None or temp >= FAN_FORCE_AUTO_C:
+        return None
+    if temp > FAN_FLOOR_C:
+        return FAN_FLOOR_PCT
+    if temp > FAN_NONZERO_C:
+        return FAN_NONZERO_PCT
+    return 0
+
+
+def fan_helper(*args):
+    """Run the root helper. Returns (ok, parsed-json-or-None)."""
+    try:
+        p = subprocess.run(["sudo", "-n", FAN_HELPER, *[str(a) for a in args]],
+                           capture_output=True, text=True, timeout=15)
+        try:
+            data = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
+        except ValueError:
+            data = None
+        return p.returncode == 0, data
+    except (OSError, subprocess.SubprocessError) as e:
+        fan_log(f"helper error: {e}")
+        return False, None
+
+
+def fan_available():
+    return fan_hwmon() is not None and os.access(FAN_HELPER, os.X_OK)
+
+
+def fan_to_auto(reason):
+    with FAN_LOCK:
+        ok, _ = fan_helper("auto")
+        was = FAN["mode"]
+        FAN.update(mode="auto", percent=None, until=None, cool_since=None)
+        fan_log(f"auto ({reason}; was {was}; helper {'ok' if ok else 'FAILED'})")
+        return ok
+
+
+def fan_apply_locked(temp):
+    """Push the current override to the hardware, honouring the floors. Returns False if it fell back to auto."""
+    if FAN["mode"] == "auto":
+        return True
+    floor = fan_min_percent(temp)
+    if floor is None:
+        fan_to_auto(f"temperature {temp} C")
+        return False
+    secs = max(5, int(FAN["until"] - time.time()) + 60)   # the root-side backstop outlives ours
+    if FAN["mode"] == "max":
+        ok, _ = fan_helper("max", secs)
+    else:
+        ok, _ = fan_helper("set", fan_pwm_for(max(FAN["percent"], floor)), secs)
+    if not ok:
+        fan_to_auto("helper refused or failed")
+        return False
+    FAN["applied_at"] = time.monotonic()
+    return True
+
+
+def fan_snapshot():
+    h = fan_hwmon()
+    temp = fan_temp()
+    pwm = rpm = None
+    if h:
+        try:
+            pwm = int(read_text(h / "pwm1").strip())
+            rpm = int(read_text(h / "fan1_input").strip())
+        except ValueError:
+            pass
+    with FAN_LOCK:
+        mode, until = FAN["mode"], FAN["until"]
+    floor = fan_min_percent(temp) if mode != "auto" else None
+    return {"available": fan_available(), "mode": mode,
+            "percent": round(pwm * 100 / 255) if pwm is not None else None, "rpm": rpm,
+            "tempC": round(temp, 1) if temp is not None else None,
+            "revertsAt": int(until) if until else None,
+            "minPercent": floor if floor else None}
+
+
+def fan_watchdog():
+    while True:
+        time.sleep(FAN_TICK_S)
+        try:
+            with FAN_LOCK:
+                if FAN["mode"] == "auto":
+                    continue
+                now = time.time()
+                temp = fan_temp()
+                if FAN["until"] and now >= FAN["until"]:
+                    fan_to_auto("timer ended")
+                elif temp is None or temp >= FAN_FORCE_AUTO_C:
+                    fan_to_auto(f"temperature {temp} C")
+                elif FAN["mode"] == "max" and temp < FAN_NONZERO_C:
+                    FAN["cool_since"] = FAN["cool_since"] or now
+                    if now - FAN["cool_since"] >= FAN_COOL_S:
+                        fan_to_auto(f"max ended early, {temp} C for {FAN_COOL_S:.0f}s")
+                else:
+                    FAN["cool_since"] = None
+                    if time.monotonic() - FAN["applied_at"] >= FAN_REAPPLY_S:
+                        fan_apply_locked(temp)
+        except Exception as e:  # the watchdog must never die
+            fan_log(f"watchdog error: {e}")
+            try:
+                fan_to_auto("watchdog error")
+            except Exception:
+                pass
+
+
+@app.get("/v1/fan")
+def fan_get():
+    return jsonify(fan_snapshot())
+
+
+@app.post("/v1/fan")
+def fan_post():
+    if not fan_available():
+        return err("fan control unavailable", 503)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return err("JSON object expected")
+    mode = body.get("mode")
+    if mode not in ("auto", "manual", "max"):
+        return err("mode must be auto, manual or max")
+    if mode == "auto":
+        if not fan_to_auto("requested"):
+            return err("could not set automatic", 503)
+        return jsonify(fan_snapshot())
+    minutes = body.get("minutes", FAN_DEFAULT_MIN[mode])
+    if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
+        return err("minutes must be a number")
+    minutes = min(120, max(1, minutes))
+    percent = 100
+    if mode == "manual":
+        percent = body.get("percent")
+        if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not 0 <= percent <= 100:
+            return err("percent must be 0-100")
+        percent = int(round(percent))
+    with FAN_LOCK:
+        temp = fan_temp()
+        if fan_min_percent(temp) is None:
+            fan_to_auto(f"refused {mode}: {temp} C")
+            return err("too hot or temperature unreadable; staying on automatic", 409, tempC=temp)
+        FAN.update(mode=mode, percent=percent, until=time.time() + minutes * FAN_MINUTE, cool_since=None)
+        if not fan_apply_locked(temp):
+            return err("fan helper failed; back on automatic", 503)
+        fan_log(f"{mode} {percent}% for {minutes:g} min at {temp} C")
+    return jsonify(fan_snapshot())
+
+
+def fan_start():
+    """Fail-safe: whatever the previous process left behind, begin on automatic, and start the watchdog."""
+    if fan_available():
+        ok, _ = fan_helper("auto")
+        fan_log(f"service start: reset to automatic ({'ok' if ok else 'FAILED'})")
+    threading.Thread(target=fan_watchdog, daemon=True, name="fan-watchdog").start()
+
+    def bye(*_):
+        fan_helper("auto")
+        os._exit(0)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, bye)
 
 
 # ---------- frames: entries ----------
@@ -1141,4 +1351,5 @@ def preview_static(p):
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "purge":
         sys.exit(cli_purge())
+    fan_start()
     app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "5001")), threaded=True)
