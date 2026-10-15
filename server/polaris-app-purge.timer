@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Polaris app cache purge
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
