@@ -7,18 +7,33 @@ import UIKit
 struct ConnectionBanner: View {
     var text: String = "Not connected to Polaris. Connect Tailscale to use live features."
     var buttonTitle: String = "Connect Tailscale"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "bolt.horizontal.circle").foregroundStyle(Theme.warn)
-            Text(text).font(Theme.font(13, relativeTo: .footnote)).foregroundStyle(Theme.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button(buttonTitle) { Self.openTailscale() }
-                .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
+        HStack(alignment: .top, spacing: DS.Space.m) {
+            Image(systemName: "bolt.horizontal.circle.fill")
+                .font(.system(size: 26))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Theme.warn)
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                Text(text)
+                    .font(Theme.font(13, relativeTo: .footnote))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { Self.openTailscale() } label: {
+                    Label(buttonTitle, systemImage: "arrow.up.forward.app")
+                        .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
+                }
                 .buttonStyle(.glass)
+                .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .glassEffect(.regular.tint(Theme.warn.opacity(0.35)), in: .rect(cornerRadius: DS.Radius.control))
+        .padding(DS.Space.m)
+        .glassEffect(.regular.tint(Theme.warn.opacity(0.28)), in: .rect(cornerRadius: DS.Radius.control))
+        .accessibilityElement(children: .contain)
     }
 
     static func openTailscale() {
