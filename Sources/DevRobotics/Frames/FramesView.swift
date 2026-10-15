@@ -15,6 +15,13 @@ private enum FramesFilter: String, CaseIterable, Identifiable {
     func includes(_ k: FrameKind) -> Bool {
         switch self { case .all: true; case .photos: k == .photo; case .stories: k == .story }
     }
+    /// The neighbouring filter in swipe order (All, Photos, Stories); nil at the ends.
+    func neighbour(forward: Bool) -> FramesFilter? {
+        let all = FramesFilter.allCases
+        guard let i = all.firstIndex(of: self) else { return nil }
+        let j = forward ? i + 1 : i - 1
+        return all.indices.contains(j) ? all[j] : nil
+    }
 }
 
 enum FramesViewMode: String, CaseIterable, Identifiable {
@@ -46,6 +53,8 @@ struct FramesView: View {
     @State private var showPublish = false
     @State private var toDelete: FrameRow?
     @State private var filter: FramesFilter = .all
+    @State private var slideFrom: Edge = .trailing          // direction of the last filter swipe
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("frames.viewMode") private var modeRaw = FramesViewMode.tidy.rawValue
     private var mode: FramesViewMode { FramesViewMode(rawValue: modeRaw) ?? .tidy }
     @Namespace private var zoomNS
@@ -67,12 +76,15 @@ struct FramesView: View {
                         .sensoryFeedback(.selection, trigger: filter)
                     }
                     content
+                        .id(filter)
+                        .transition(reduceMotion ? .opacity : .push(from: slideFrom))
                 }
                 .padding(.horizontal, DS.Space.l)
                 .padding(.top, DS.Space.s)
                 .padding(.bottom, DS.Space.xl)
             }
             .dsPage()
+            .simultaneousGesture(filterSwipe)
             .navigationTitle("Frames")
             .navigationDestination(for: EditTarget.self) { t in
                 EditorHost(target: t, model: model)
@@ -242,6 +254,20 @@ struct FramesView: View {
                                    systemImage: filter == .photos ? "photo" : "book",
                                    description: Text("Nothing here yet."))
         }
+    }
+
+    /// Swipe left / right on the list to move between All, Photos and Stories. Only clearly horizontal drags count,
+    /// so vertical scrolling and taps on tiles are unaffected.
+    private var filterSwipe: some Gesture {
+        DragGesture(minimumDistance: 30)
+            .onEnded { v in
+                let dx = v.translation.width, dy = v.translation.height
+                guard !model.rows.isEmpty, abs(dx) > 70, abs(dx) > abs(dy) * 2 else { return }
+                let forward = dx < 0                       // swipe left -> next tab
+                guard let next = filter.neighbour(forward: forward) else { return }
+                slideFrom = forward ? .trailing : .leading
+                withAnimation(reduceMotion ? nil : .dsSpring) { filter = next }
+            }
     }
 
     private var bannerText: String? {
