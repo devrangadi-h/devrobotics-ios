@@ -131,7 +131,7 @@ struct AboutView: View {
             .accessibilityElement(children: .combine)
 
             Label {
-                Text("Reinstall required: plug the phone into your Mac and run `Tools/install.sh` (or ask Claude).")
+                Text("Reinstall required before it expires: plug the phone into your Mac and it reinstalls itself, or use \"Reinstall from my Mac\" below.")
                     .font(Theme.font(14, relativeTo: .subheadline))
             } icon: { Image(systemName: "cable.connector").foregroundStyle(Theme.accent) }
 
