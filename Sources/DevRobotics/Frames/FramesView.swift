@@ -54,10 +54,10 @@ struct FramesView: View {
                     } label: { Image(systemName: "plus") }
                 }
             }
-            .refreshable { await model.refresh(settings) }
+            .refreshable { model.summary = nil; await model.refresh(settings) }
             .task { await model.refresh(settings) }
             .safeAreaInset(edge: .bottom) { sendBar }
-            .sheet(isPresented: $showPublish, onDismiss: { Task { await model.refresh(settings) } }) {
+            .sheet(isPresented: $showPublish, onDismiss: { model.summary = nil; Task { await model.refresh(settings) } }) {
                 PublishView()
             }
             .confirmationDialog("Delete this entry?", isPresented: Binding(get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }),

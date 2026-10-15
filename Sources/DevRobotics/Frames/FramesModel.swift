@@ -128,6 +128,13 @@ final class FramesModel {
         }
         summary = failCount == 0 ? "Sent \(okCount) draft\(okCount == 1 ? "" : "s") to Polaris."
                                  : "\(okCount) sent, \(failCount) failed. Failed drafts are kept."
+        if failCount == 0 {  // success notes fade; failures stay until the next action
+            let shown = summary
+            Task {
+                try? await Task.sleep(for: .seconds(8))
+                if summary == shown { summary = nil }
+            }
+        }
         await refresh(settings)
     }
 
