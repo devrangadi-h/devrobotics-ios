@@ -54,6 +54,14 @@ final class DemoURLProtocol: URLProtocol {
         case "/v1/frames/entries": return json(["entries": entries])
         case "/v1/frames/preview", "/v1/frames/publish", "/v1/frames/draft-preview": return json(job(), status: 202)
         case "/api/lights/ping": return json(["ok": true])
+        case "/api/lights/state":
+            return json(["ok": true, "updatedAt": Int(Date().timeIntervalSince1970),
+                         "timer": ["action": "off", "endsAt": Int(Date().timeIntervalSince1970) + 1500],
+                         "lamps": [
+                            ["index": 0, "name": "Floor lamp left", "online": true, "on": true, "brightness": 72,
+                             "colorTempK": 3000, "color": NSNull()],
+                            ["index": 1, "name": "Floor lamp right", "online": true, "on": true, "brightness": 72,
+                             "colorTempK": NSNull(), "color": ["r": 120, "g": 80, "b": 255]]]])
         default: break
         }
         if path.hasPrefix("/api/lights/") { return json(["ok": true, "responses": []]) }
