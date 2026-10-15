@@ -18,7 +18,8 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "DevRobotics"
+            name: "DevRobotics",
+            resources: [.process("Resources")]
         ),
     ]
 )
