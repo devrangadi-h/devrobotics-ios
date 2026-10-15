@@ -31,9 +31,9 @@ struct StoryCoverHero: View {
     @Bindable var model: DraftEditorModel
     @Binding var title: String
     var titleFocus: FocusState<Bool>.Binding
+    var placeFocus: FocusState<Bool>.Binding
     let busy: Bool
     let onPickCover: () -> Void
-    let onPlace: () -> Void
 
     private var coverName: String? {
         let c = model.draft.field("cover")
@@ -86,22 +86,29 @@ struct StoryCoverHero: View {
 
     private var plate: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
-            TextField("Title", text: $title, axis: .vertical)
+            TextField("", text: $title, axis: .vertical)
                 .focused(titleFocus)
                 .lineLimit(1...6)
                 .font(Theme.font(28, weight: .bold, relativeTo: .largeTitle))
                 .textInputAutocapitalization(.sentences)
                 .submitLabel(.done)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(action: onPlace) {
-                let place = model.draft.field("place")
-                Label(place.isEmpty ? "Add a place" : place, systemImage: "mappin.and.ellipse")
+                .overlay(alignment: .topLeading) {
+                    if title.isEmpty {
+                        Text("Add a title").font(Theme.font(28, weight: .bold, relativeTo: .largeTitle))
+                            .foregroundStyle(.tertiary).allowsHitTesting(false)
+                    }
+                }
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: "mappin.and.ellipse").foregroundStyle(.secondary)
+                TextField("Add a place", text: model.binding("place"))
+                    .focused(placeFocus)
+                    .submitLabel(.done)
+                    .onSubmit { placeFocus.wrappedValue = false }
+                    .textInputAutocapitalization(.words)
                     .font(Theme.font(14, weight: .medium, relativeTo: .subheadline))
-                    .foregroundStyle(place.isEmpty ? Theme.accent : Color.secondary)
-                    .lineLimit(2)
-                    .frame(minHeight: 28, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .frame(minHeight: 28)
         }
         .padding(DS.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,9 +122,38 @@ struct StoryCoverHero: View {
 struct StoryFloatingBar: View {
     @Binding var mode: StoryEditorView.Mode
     let onAdd: (AddAction) -> Void
+    var collapsed = false
+    var onExpand: () -> Void = {}
     @Namespace private var ns
 
     var body: some View {
+        Group {
+            if collapsed {
+                Button(action: onExpand) {
+                    Image(systemName: mode == .write ? "square.and.pencil" : "eye")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 48, height: 48)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .padding(DS.Space.xs)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show Write, Preview and add")
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .transition(.scale(scale: 0.8, anchor: .trailing).combined(with: .opacity))
+            } else {
+                expanded.transition(.scale(scale: 0.9, anchor: .trailing).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, DS.Space.l)
+        .padding(.bottom, DS.Space.s)
+        .frame(height: StoryFloatingBar.height, alignment: .bottom)
+        .dsAnimation(.dsSpring, value: collapsed)
+    }
+
+    /// Fixed so collapsing never changes the bottom inset (no scroll feedback loop).
+    static let height: CGFloat = 76
+
+    private var expanded: some View {
         GlassEffectContainer(spacing: DS.Space.m) {
             HStack(spacing: DS.Space.s) {
                 ForEach(StoryEditorView.Mode.allCases, id: \.self) { m in
@@ -138,8 +174,6 @@ struct StoryFloatingBar: View {
             }
         }
         .sensoryFeedback(.selection, trigger: mode)
-        .padding(.horizontal, DS.Space.l)
-        .padding(.bottom, DS.Space.s)
     }
 
     private func segment(_ m: StoryEditorView.Mode) -> some View {

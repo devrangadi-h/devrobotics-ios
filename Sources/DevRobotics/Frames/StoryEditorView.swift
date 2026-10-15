@@ -7,6 +7,24 @@ struct TrimRequest: Identifiable {
     let finish: (URL?) -> Void
 }
 
+private enum PendingProblemAction {
+    case fix(FrameProblem.Fix)
+    case select(FrameProblem)
+}
+
+private struct ScrollRequest: Equatable {
+    enum Target: Equatable { case top, block(UUID) }
+    let target: Target
+    let n: Int
+}
+
+private struct ProblemsKey: Equatable {
+    var body: String
+    var fields: [String: String]
+    var files: [String]
+    var issues: [UUID]
+}
+
 /// The story editor: one scrolling document (cover, title, blocks) with Write / Preview modes.
 /// Pieces live in `StoryEditor/`.
 struct StoryEditorView: View {
@@ -37,6 +55,17 @@ struct StoryEditorView: View {
     @State private var trimRequest: TrimRequest?
     @State private var keyboardUp = false
     @FocusState private var titleFocused: Bool
+    @FocusState private var placeFocused: Bool
+
+    @State private var problems: [FrameProblem] = []
+    @State private var showProblems = false
+    @State private var pending: PendingProblemAction?
+    @State private var showSetDate = false
+    @State private var highlightID: UUID?
+    @State private var scrollRequest: ScrollRequest?
+    @State private var barCollapsed = false
+    @State private var downAcc: CGFloat = 0
+    @State private var upAcc: CGFloat = 0
 
     init(model: DraftEditorModel) {
         self.model = model
@@ -52,10 +81,28 @@ struct StoryEditorView: View {
             if mode == .write { writeView } else { previewView }
         }
         .background { AppBackground() }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !problems.isEmpty {
+                ProblemsPill(problems: problems) { showProblems = true }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, DS.Space.xs)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardUp {
-                StoryFloatingBar(mode: $mode) { add($0, at: doc.blocks.count) }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                VStack(spacing: DS.Space.xs) {
+                    if mode == .write, !unusedFiles.isEmpty {
+                        UnusedMediaTray(model: model, names: unusedFiles,
+                                        onInsert: { insertFile($0) },
+                                        onRemove: { model.remove($0) })
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    StoryFloatingBar(mode: $mode, onAdd: { add($0, at: doc.blocks.count) },
+                                     collapsed: barCollapsed && mode == .write,
+                                     onExpand: { barCollapsed = false })
+                }
+                .dsAnimation(.dsSpring, value: unusedFiles)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .storyTracksKeyboard($keyboardUp)
@@ -73,6 +120,11 @@ struct StoryEditorView: View {
         v
         .onChange(of: model.draft.fields) { _, _ in bridge?.markChanged() }
         .onChange(of: model.draft.allFiles) { _, _ in bridge?.markChanged() }
+        .task(id: problemsKey) {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            recomputeProblems()
+        }
         .onChange(of: mode) { _, m in modeChanged(m) }
         .onChange(of: imageItems) { _, v in handle(v, .image) { imageItems = [] } }
         .onChange(of: imagesItems) { _, v in handle(v, .images) { imagesItems = [] } }
@@ -98,6 +150,142 @@ struct StoryEditorView: View {
         }
         if !doc.loaded { doc.load(model.draft.body) }
         if bridge == nil { bridge = StoryPreviewBridge(model: model, settings: settings) }
+        if DemoMode.isOn, DemoMode.screen == "storyproblems" { bridge?.refresh() }   // screenshots: show fixture issues
+    }
+
+    // MARK: problems
+
+    private var problemsKey: ProblemsKey {
+        ProblemsKey(body: model.draft.body, fields: model.draft.fields, files: model.draft.allFiles,
+                    issues: (bridge?.issues ?? []).map(\.id))
+    }
+
+    private var unusedFiles: [String] {
+        var seen = Set<String>()
+        return problems.filter { $0.kind == .unusedFile }.compactMap(\.fileName).filter { seen.insert($0).inserted }
+    }
+
+    private func recomputeProblems() {
+        let blocks = doc.blocks.map(\.story)
+        let issues = bridge?.issues ?? []
+        let local = FrameProblemEngine.local(draft: model.draft, blocks: blocks, localFileURL: { [model] n in
+            model.draft.localFiles.contains(n) ? model.mediaURL(n) : nil
+        })
+        var merged = FrameProblemEngine.merge(local, FrameProblemEngine.fromPipeline(issues, blocks: blocks))
+        if merged.isEmpty, DemoMode.isOn { merged = demoProblems(issues) }   // screenshots only, until the engine lands
+        if merged != problems { problems = merged }
+    }
+
+    /// Demo-only stand-in for the engine so screenshots show badges and the tray.
+    private func demoProblems(_ issues: [PreviewIssue]) -> [FrameProblem] {
+        issues.map { i in
+            let name = i.fileName
+            switch i.kind {
+            case .noDate:
+                return FrameProblem(id: "noDate", severity: .error, kind: .noDate, title: "No date taken for \(name ?? "the cover")",
+                                    fileName: name, fixes: [.setDate])
+            case .missingFile:
+                let bid = doc.blocks.first { b in b.fileNames.contains { $0 == name } }?.id
+                return FrameProblem(id: "missing:\(name ?? "")", severity: .error, kind: .missingFile,
+                                    title: "\(name ?? "A file") isn't in this story", fileName: name, blockID: bid,
+                                    fixes: bid.map { [.removeBlock($0)] } ?? [])
+            default:
+                return FrameProblem(id: "unused:\(name ?? i.message)", severity: .warning, kind: .unusedFile,
+                                    title: "\(name ?? "A file") isn't used in the story", fileName: name,
+                                    fixes: name.map { [.insertFile($0), .removeFile($0)] } ?? [])
+            }
+        }
+    }
+
+    /// Problems per block (explicit blockID, else resolved from the body line), plus those about the story as a whole.
+    private var problemMap: (byBlock: [UUID: [FrameProblem]], general: [FrameProblem]) {
+        var map: [UUID: [FrameProblem]] = [:]
+        var rest: [FrameProblem] = []
+        let ranges = currentRanges
+        for p in problems where p.kind != .unusedFile {
+            var target = p.blockID.flatMap { id in doc.blocks.contains { $0.id == id } ? id : nil }
+            if target == nil, let l = p.bodyLine { target = ranges.first { $0.lines.contains(l) }?.id }
+            if let target { map[target, default: []].append(p) } else { rest.append(p) }
+        }
+        return (map, rest)
+    }
+
+    private func perform(_ fix: FrameProblem.Fix) {
+        switch fix {
+        case .setDate:
+            showSetDate = true
+        case .insertFile(let n):
+            insertFile(n)
+        case .removeFile(let n):
+            model.remove(n)
+        case .removeBlock(let id):
+            doc.remove(id)
+        case .showText(let id):
+            if let b = doc.blocks.first(where: { $0.id == id }), b.isMedia,
+               let i = doc.index(of: id) {
+                let md = EditorBlocks.serialize([b]).trimmingCharacters(in: .whitespacesAndNewlines)
+                doc.blocks[i] = EditorBlock(id: id, text: md)
+            }
+            doc.focusID = id
+            requestScroll(.block(id), highlight: id)
+        case .openDetails(let field):
+            if field == "title" || field == "place" {
+                requestScroll(.top, highlight: nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if field == "title" { titleFocused = true } else { placeFocused = true }
+                }
+            } else {
+                detailsFocusDate = field == "date"
+                showDetails = true
+            }
+        }
+    }
+
+    private func select(_ p: FrameProblem) {
+        let target = problemMap.byBlock.first { $0.value.contains(p) }?.key
+            ?? p.blockID.flatMap { id in doc.blocks.contains { $0.id == id } ? id : nil }
+        if let target { requestScroll(.block(target), highlight: target) } else { requestScroll(.top, highlight: nil) }
+    }
+
+    private func requestScroll(_ t: ScrollRequest.Target, highlight: UUID?) {
+        var delay = 0.05
+        if mode != .write { mode = .write; delay = 0.4 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            scrollRequest = ScrollRequest(target: t, n: (scrollRequest?.n ?? 0) + 1)
+            guard let highlight else { return }
+            highlightID = highlight
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                if highlightID == highlight { highlightID = nil }
+            }
+        }
+    }
+
+    private func runPending() {
+        guard let p = pending else { return }
+        pending = nil
+        switch p {
+        case .fix(let f): perform(f)
+        case .select(let pr): select(pr)
+        }
+    }
+
+    private func insertFile(_ name: String, before index: Int? = nil) {
+        var b = EditorBlock(media: FrameFormat.isImage(name) ? .image : .clip)
+        b.items = [.init(name: name, note: "")]
+        doc.insert(b, at: index ?? doc.insertionIndexForTray)
+        requestScroll(.block(b.id), highlight: b.id)
+    }
+
+    private func collapseBar(old: CGFloat, new: CGFloat) {
+        guard mode == .write, new >= 0 else { return }
+        let d = new - old
+        if d > 0 {
+            downAcc += d; upAcc = 0
+            if downAcc > 30, new > 60, !barCollapsed { barCollapsed = true }
+        } else if d < 0 {
+            upAcc += -d; downAcc = 0
+            if upAcc > 20, barCollapsed { barCollapsed = false }
+        }
     }
 
     private func modeChanged(_ m: Mode) {}
@@ -124,6 +312,24 @@ struct StoryEditorView: View {
             if let id = editingID { BlockDetailsSheet(block: doc.block(id), model: model) }
         }
         .sheet(isPresented: $showDetails) { StoryDetailsSheet(model: model, focusDate: detailsFocusDate) }
+        .sheet(isPresented: $showProblems, onDismiss: runPending) {
+            ProblemsSheet(problems: problems,
+                          onFix: { _, fix in
+                              switch fix {
+                              case .setDate, .openDetails:
+                                  pending = .fix(fix); showProblems = false
+                              default: perform(fix)
+                              }
+                          },
+                          onSelect: { p in pending = .select(p); showProblems = false })
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showSetDate) {
+            SetDateSheet(initial: StoryDates.initial(for: model)) { d in
+                model.draft.fields["date"] = StoryDates.fmt.string(from: d)
+            }
+            .presentationDetents([.medium, .large])
+        }
         .fullScreenCover(isPresented: $showFullScreen) { FullScreenWriter(doc: doc) }
         .fullScreenCover(item: $trimRequest) { req in
             VideoTrimmer(url: req.url) { out in
@@ -158,22 +364,6 @@ struct StoryEditorView: View {
 
     // MARK: write
 
-    private var issueMap: (byBlock: [UUID: [PreviewIssue]], unmapped: [PreviewIssue]) {
-        guard let issues = bridge?.issues, !issues.isEmpty else { return ([:], []) }
-        let ranges = currentRanges
-        var map: [UUID: [PreviewIssue]] = [:]
-        var rest: [PreviewIssue] = []
-        for i in issues {
-            var target: UUID?
-            if i.kind == .missingFile, let n = i.fileName {
-                target = doc.blocks.first { $0.fileNames.contains { $0.caseInsensitiveCompare(n) == .orderedSame } }?.id
-            }
-            if target == nil { target = i.bodyLine.flatMap { l in ranges.first { $0.lines.contains(l) }?.id } }
-            if let target { map[target, default: []].append(i) } else { rest.append(i) }
-        }
-        return (map, rest)
-    }
-
     /// Block line ranges in the body the server will build from: the normalised serialization once edited,
     /// the stored body (zipped by index) for an untouched draft; empty when they can't be trusted.
     private var currentRanges: [(id: UUID, lines: ClosedRange<Int>)] {
@@ -182,37 +372,57 @@ struct StoryEditorView: View {
     }
 
     private var writeView: some View {
-        let issues = issueMap
+        let pm = problemMap
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    issueBanner(proxy: proxy)
                     cover
+                        .id("cover-top")
                         .padding(.bottom, DS.Space.s)
+                    ForEach(pm.general) { ProblemBadge(problem: $0, onFix: { perform($0) }) }
                     ForEach(Array(doc.blocks.enumerated()), id: \.element.id) { idx, b in
                         addRow(at: idx)
-                        BlockRow(block: b, model: model, doc: doc, issues: issues.byBlock[b.id] ?? [],
+                        BlockRow(block: b, model: model, doc: doc, problems: pm.byBlock[b.id] ?? [],
+                                 highlighted: highlightID == b.id,
                                  isFirst: idx == 0, isLast: idx == doc.blocks.count - 1,
                                  onEdit: { editingID = b.id },
                                  onDelete: { requestDelete(b) },
-                                 onSetDate: { detailsFocusDate = true; showDetails = true })
+                                 onFix: { perform($0) },
+                                 onDropFile: { insertFile($0, before: idx) })
                             .id(b.id)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                     footer
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let s = items.first, s.hasPrefix("file:") else { return false }
+                            insertFile(String(s.dropFirst(5)), before: doc.blocks.count)
+                            return true
+                        }
                 }
                 .dsAnimation(.dsSpring, value: doc.blocks.map(\.id))
                 .padding(.horizontal, DS.Space.l).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { old, new in
+                collapseBar(old: old, new: new)
+            }
+            .onChange(of: scrollRequest) { _, r in
+                guard let r else { return }
+                withAnimation(.dsSpring) {
+                    switch r.target {
+                    case .top: proxy.scrollTo("cover-top", anchor: .top)
+                    case .block(let id): proxy.scrollTo(id, anchor: .center)
+                    }
+                }
+            }
         }
     }
 
     @ViewBuilder private var cover: some View {
         StoryCoverHero(model: model, title: titleBinding, titleFocus: $titleFocused,
+                       placeFocus: $placeFocused,
                        busy: model.busy,
-                       onPickCover: { showCoverPicker = true },
-                       onPlace: { detailsFocusDate = false; showDetails = true })
+                       onPickCover: { showCoverPicker = true })
     }
 
     /// Wrapping title: Return ends editing instead of inserting a newline (titles are single-line in the file).
@@ -255,49 +465,10 @@ struct StoryEditorView: View {
             .padding(.top, DS.Space.l)
     }
 
-    @ViewBuilder private func issueBanner(proxy: ScrollViewProxy) -> some View {
-        if let issues = bridge?.issues, !issues.isEmpty {
-            let hasErr = issues.contains { $0.level == .error }
-            Button {
-                let ranges = currentRanges
-                let first = issues.min { ($0.bodyLine ?? 0) < ($1.bodyLine ?? 0) }
-                if let first, let l = first.bodyLine, let t = ranges.first(where: { $0.lines.contains(l) })?.id {
-                    withAnimation { proxy.scrollTo(t, anchor: .center) }
-                } else if first?.kind == .noDate {
-                    detailsFocusDate = true; showDetails = true
-                }
-            } label: {
-                Label("\(issues.count) \(issues.count == 1 ? "problem" : "problems")", systemImage: "exclamationmark.triangle.fill")
-                    .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
-                    .foregroundStyle(hasErr ? Color.red : Theme.warn)
-                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular.tint((hasErr ? Color.red : Theme.warn).opacity(0.25)).interactive(),
-                                 in: .rect(cornerRadius: DS.Radius.control))
-            }
-            .buttonStyle(.plain)
-            .padding(.bottom, DS.Space.xs)
-            ForEach(issueMap.unmapped) { IssueBadge(issue: $0) }
-            if issues.contains(where: { $0.kind == .noDate }) {
-                Button("Set a date") { detailsFocusDate = true; showDetails = true }.font(.footnote.bold())
-            }
-        }
-    }
-
     // MARK: preview
 
     @ViewBuilder private var previewView: some View {
         VStack(spacing: 0) {
-            if let b = bridge, !b.issues.isEmpty {
-                Label("\(b.issues.count) \(b.issues.count == 1 ? "problem" : "problems") - fix them in Write",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote.bold()).foregroundStyle(Theme.warn)
-                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular.tint(Theme.warn.opacity(0.2)), in: .rect(cornerRadius: DS.Radius.control))
-                    .padding(.horizontal, DS.Space.l)
-                    .onTapGesture { withAnimation(.dsSpring) { mode = .write } }
-            }
             if let b = bridge, b.unavailableReason == nil {
                 b.makePreviewView()
             } else {
