@@ -1,35 +1,45 @@
 import SwiftUI
 
-/// A pipeline problem, body-relative (1-based) line.
-struct EditorIssue: Identifiable, Equatable {
-    enum Level { case error, warning }
-    enum Kind { case noDate, missingFile, marker, other }
-    let id = UUID()
-    var level: Level
-    var line: Int
-    var kind: Kind
-    var message: String
-    var name: String?
-}
-
-/// Everything the editor needs from the real-page preview. The editor only talks to this protocol, so the
-/// DraftPreviewController (another agent) plugs in through `StoryPreviewBridges.make` below.
+/// Adapter between the editor and the real-page preview (`DraftPreviewController` / `DraftPreviewView`).
+/// Everything the editor needs from the preview goes through here.
 @MainActor
-protocol StoryPreviewBridge: AnyObject {
-    var issues: [EditorIssue] { get }
-    var isStale: Bool { get }
-    var isBuilding: Bool { get }
-    /// Non-nil when the real preview can't be built (e.g. no Tailscale): the editor falls back to
-    /// the local "approximate" preview and shows this text.
-    var unavailableReason: String? { get }
-    func refresh()
-    func markChanged()
-    func discard()
-    func makePreviewView() -> AnyView
-}
+final class StoryPreviewBridge {
+    let controller = DraftPreviewController()
+    private let model: DraftEditorModel
+    private let settings: SettingsStore
 
-enum StoryPreviewBridges {
-    /// INTEGRATION POINT. Return an adapter around `DraftPreviewController` + `DraftPreviewView(controller:…)`.
-    /// While nil, Preview shows the local approximate preview and no pipeline issues are surfaced.
-    @MainActor static func make(for model: DraftEditorModel) -> StoryPreviewBridge? { nil }
+    init(model: DraftEditorModel, settings: SettingsStore) {
+        self.model = model
+        self.settings = settings
+    }
+
+    /// Body-relative pipeline issues.
+    var issues: [PreviewIssue] { controller.issues }
+    var isStale: Bool { controller.isStale }
+
+    /// Non-nil when the real preview couldn't be reached: the editor shows the approximate local preview.
+    var unavailableReason: String? {
+        if case .failed(let m) = controller.phase, controller.needsConnection { return m }
+        return nil
+    }
+
+    func markChanged() { controller.markChanged() }
+
+    func refresh() {
+        Task {
+            await controller.refreshIfNeeded(draft: model.draft, settings: settings, force: true,
+                                             localFileURL: { [model] in model.mediaURL($0) })
+        }
+    }
+
+    /// Frees the draft's folder on the Pi. Call when the draft is sent or discarded.
+    func discard() {
+        let id = model.draft.id
+        let s = settings
+        Task { await controller.discard(draftID: id, settings: s) }
+    }
+
+    func makePreviewView() -> some View {
+        DraftPreviewView(controller: controller, draft: model.draft, localFileURL: { [model] in model.mediaURL($0) })
+    }
 }

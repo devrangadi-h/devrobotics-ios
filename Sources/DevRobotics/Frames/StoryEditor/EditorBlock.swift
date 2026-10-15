@@ -1,11 +1,7 @@
 import Foundation
 
-/// Editor-side block model plus a self-contained Markdown <-> blocks codec.
-///
-/// INTEGRATION: `StoryBlocks.swift` (another agent) is the intended codec. Until it lands this file carries
-/// its own lossless-by-construction codec (anything it can't understand becomes an editable text block).
-/// To swap, re-implement `EditorBlocks.parse/serialize/lineRanges` on top of `StoryBlocks`; nothing else
-/// in the editor touches the codec.
+/// Editor-side block model. Text blocks hold the Markdown source of the block (so live formatting can show
+/// the syntax); media blocks hold parsed fields. `EditorBlocks` converts to/from `StoryBlocks`, the shared codec.
 struct EditorBlock: Identifiable, Equatable {
     enum Media: Equatable { case image, images, clip, youtube }
     enum TextKind: Equatable { case paragraph, heading, bullets, numbered, quote }
@@ -29,185 +25,108 @@ struct EditorBlock: Identifiable, Equatable {
 
     var textKind: TextKind {
         let first = text.components(separatedBy: "\n").first ?? ""
-        if first.hasPrefix("## ") || first.hasPrefix("# ") { return .heading }
+        if first.hasPrefix("## ") { return .heading }
         if first.hasPrefix("> ") { return .quote }
-        if first.hasPrefix("- ") || first.hasPrefix("* ") { return .bullets }
+        if first.hasPrefix("- ") { return .bullets }
         if first.range(of: #"^\d+\. "#, options: .regularExpression) != nil { return .numbered }
         return .paragraph
     }
 
     var fileNames: [String] { media == .youtube ? [] : items.map(\.name) }
 
-    /// Markdown for this block; "" when it has nothing worth writing.
-    var markdown: String {
+    /// Codec block for this editor block. Text goes in as a paragraph (kept verbatim by the codec).
+    var story: StoryBlock {
         switch media {
         case .none:
             let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if t.range(of: #"^(#{1,2}|-|>|\d+\.)$"#, options: .regularExpression) != nil { return "" }
-            return t
+            // a bare list/heading/quote prefix with nothing after it is not content
+            if t.range(of: #"^(#{1,2}|-|>|\d+\.)$"#, options: .regularExpression) != nil {
+                return StoryBlock(id: id, kind: .paragraph(""))
+            }
+            return StoryBlock(id: id, kind: .paragraph(t))
         case .image:
-            guard let i = items.first else { return "" }
-            return FrameFormat.imageMarker(name: i.name, note: i.note, alt: alt, place: place, full: full)
+            let i = items.first ?? Item(name: "", note: "")
+            return StoryBlock(id: id, kind: .image(name: i.name, note: i.note, alt: alt, place: place, full: full))
         case .images:
-            guard !items.isEmpty else { return "" }
-            return FrameFormat.imagesMarker(items.map { ($0.name, $0.note) }, alt: alt)
+            return StoryBlock(id: id, kind: .images(items: items.map { StoryBlock.Item(name: $0.name, note: $0.note) }, alt: alt))
         case .clip:
-            guard let i = items.first else { return "" }
-            return FrameFormat.clipMarker(name: i.name, note: i.note)
+            let i = items.first ?? Item(name: "", note: "")
+            return StoryBlock(id: id, kind: .clip(name: i.name, note: i.note))
         case .youtube:
-            return url.isEmpty ? "" : FrameFormat.youtubeMarker(url: url, title: title)
+            return StoryBlock(id: id, kind: .youtube(url: url, title: title))
+        }
+    }
+
+    init(_ s: StoryBlock) {
+        id = s.id
+        switch s.kind {
+        case .paragraph(let t), .raw(let t):
+            text = t
+        case .heading(let t):
+            text = "## " + t
+        case .bullets(let l):
+            text = l.map { "- " + $0 }.joined(separator: "\n")
+        case .numbered(let l):
+            text = l.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        case .quote(let t):
+            text = t.components(separatedBy: "\n").map { $0.isEmpty ? ">" : "> " + $0 }.joined(separator: "\n")
+        case .image(let n, let note, let alt, let place, let full):
+            media = .image
+            items = [Item(name: n, note: note)]
+            self.alt = alt; self.place = place; self.full = full
+        case .images(let its, let alt):
+            media = .images
+            items = its.map { Item(name: $0.name, note: $0.note) }
+            self.alt = alt
+        case .clip(let n, let note):
+            media = .clip
+            items = [Item(name: n, note: note)]
+        case .youtube(let u, let t):
+            media = .youtube
+            url = u; title = t
         }
     }
 }
 
 enum EditorBlocks {
     static func parse(_ body: String) -> [EditorBlock] {
-        var blocks: [EditorBlock] = []
-        var para: [String] = []
-        func flush() {
-            if !para.isEmpty { blocks.append(EditorBlock(text: para.joined(separator: "\n"))); para = [] }
-        }
-        for line in body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if t.isEmpty { flush() }
-            else if t.lowercased().hasPrefix("<insert") {
-                flush()
-                blocks.append(parseMarker(t) ?? EditorBlock(text: t))
-            } else { para.append(line) }
-        }
-        flush()
-        return blocks
+        StoryBlocks.parse(body).map(EditorBlock.init)
     }
 
     static func serialize(_ blocks: [EditorBlock]) -> String {
-        let parts = blocks.map(\.markdown).filter { !$0.isEmpty }
-        return parts.isEmpty ? "" : parts.joined(separator: "\n\n") + "\n"
+        StoryBlocks.serialize(blocks.map(\.story)).markdown
     }
 
-    /// 1-based, body-relative inclusive line ranges per block that produced output.
+    /// 1-based, body-relative inclusive line ranges per block that produced output, in document order.
     static func lineRanges(_ blocks: [EditorBlock]) -> [(id: UUID, lines: ClosedRange<Int>)] {
-        var out: [(id: UUID, lines: ClosedRange<Int>)] = []
-        var cursor = 1
-        for b in blocks {
-            let md = b.markdown
-            if md.isEmpty { continue }
-            let n = md.components(separatedBy: "\n").count
-            out.append((b.id, cursor...(cursor + n - 1)))
-            cursor += n + 1
-        }
-        return out
+        StoryBlocks.serialize(blocks.map(\.story)).lineRanges
+            .map { (id: $0.key, lines: $0.value) }
+            .sorted { $0.lines.lowerBound < $1.lines.lowerBound }
     }
 
-    static func wordCount(_ blocks: [EditorBlock]) -> Int {
-        blocks.filter { !$0.isMedia }.reduce(0) { total, b in
-            total + b.text.components(separatedBy: .whitespacesAndNewlines).filter { tok in
-                tok.contains { $0.isLetter || $0.isNumber } && tok.range(of: #"^\d+\.$"#, options: .regularExpression) == nil
-            }.count
+    /// Ranges against the draft body exactly as stored (the server builds from it) for a draft that hasn't been
+    /// re-serialized yet. Splits on blank lines and marker lines; nil when that disagrees with the block count.
+    static func rawRanges(body: String, blocks: [EditorBlock]) -> [(id: UUID, lines: ClosedRange<Int>)]? {
+        var ranges: [ClosedRange<Int>] = []
+        var start: Int?
+        let lines = body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        for (i, l) in lines.enumerated() {
+            let t = l.trimmingCharacters(in: .whitespaces)
+            let n = i + 1
+            if t.isEmpty {
+                if let s = start { ranges.append(s...(n - 1)); start = nil }
+            } else if t.lowercased().hasPrefix("<insert") {
+                if let s = start { ranges.append(s...(n - 1)) }
+                ranges.append(n...n)
+                start = nil
+            } else if start == nil { start = n }
         }
+        if let s = start { ranges.append(s...lines.count) }
+        let ids = blocks.filter { !StoryBlocks.serialize([$0.story]).markdown.isEmpty }.map(\.id)
+        guard ids.count == ranges.count else { return nil }
+        return zip(ids, ranges).map { (id: $0, lines: $1) }
     }
 
-    /// ceil(words / 200), 0 for an empty story.
-    static func readMinutes(words: Int) -> Int { words == 0 ? 0 : max(1, Int((Double(words) / 200).rounded(.up))) }
-
-    // MARK: marker parsing
-
-    private enum Tok { case word(String), quoted(String), kv(String, String) }
-
-    private static func tokenize(_ s: String) -> [Tok]? {
-        let c = Array(s)
-        var i = 0
-        var out: [Tok] = []
-        func quote() -> String? {
-            guard i < c.count, c[i] == "\"" else { return nil }
-            i += 1
-            var v = ""
-            while i < c.count, c[i] != "\"" { v.append(c[i]); i += 1 }
-            guard i < c.count else { return nil }
-            i += 1
-            return v
-        }
-        while i < c.count {
-            if c[i] == " " { i += 1; continue }
-            if c[i] == "\"" {
-                guard let q = quote() else { return nil }
-                out.append(.quoted(q)); continue
-            }
-            var w = ""
-            while i < c.count, c[i] != " ", c[i] != "=", c[i] != "\"" { w.append(c[i]); i += 1 }
-            if i < c.count, c[i] == "=" {
-                i += 1
-                guard let q = quote() else { return nil }
-                out.append(.kv(w.lowercased(), q))
-            } else if w.isEmpty { return nil } else { out.append(.word(w)) }
-        }
-        return out
-    }
-
-    private static func parseMarker(_ line: String) -> EditorBlock? {
-        guard line.hasSuffix(">"), line.count > 8 else { return nil }
-        let inner = String(line.dropFirst("<insert".count).dropLast())
-        guard let toks = tokenize(inner), case .word(let kindWord)? = toks.first else { return nil }
-        let rest = Array(toks.dropFirst())
-        switch kindWord.lowercased() {
-        case "image":
-            var b = EditorBlock(media: .image)
-            var item: EditorBlock.Item?
-            for t in rest {
-                switch t {
-                case .word(let w):
-                    if w.lowercased() == "full" { b.full = true }
-                    else if item == nil { item = .init(name: w, note: "") } else { return nil }
-                case .quoted(let q):
-                    guard item != nil else { return nil }
-                    item!.note = q
-                case .kv(let k, let v):
-                    if k == "alt" { b.alt = v } else if k == "place" { b.place = v } else { return nil }
-                }
-            }
-            guard let item else { return nil }
-            b.items = [item]
-            return b
-        case "images":
-            var b = EditorBlock(media: .images)
-            for t in rest {
-                switch t {
-                case .word(let w): b.items.append(.init(name: w, note: ""))
-                case .quoted(let q):
-                    guard !b.items.isEmpty else { return nil }
-                    b.items[b.items.count - 1].note = q
-                case .kv(let k, let v): if k == "alt" { b.alt = v } else { return nil }
-                }
-            }
-            return b.items.isEmpty ? nil : b
-        case "clip":
-            var b = EditorBlock(media: .clip)
-            for t in rest {
-                switch t {
-                case .word(let w):
-                    guard b.items.isEmpty else { return nil }
-                    b.items = [.init(name: w, note: "")]
-                case .quoted(let q):
-                    guard !b.items.isEmpty else { return nil }
-                    b.items[0].note = q
-                case .kv: return nil
-                }
-            }
-            return b.items.isEmpty ? nil : b
-        case "youtube":
-            var b = EditorBlock(media: .youtube)
-            for t in rest {
-                switch t {
-                case .word(let w):
-                    guard b.url.isEmpty else { return nil }
-                    b.url = w
-                case .quoted(let q):
-                    guard !b.url.isEmpty else { return nil }
-                    b.title = q
-                case .kv: return nil
-                }
-            }
-            return b.url.isEmpty ? nil : b
-        default: return nil
-        }
-    }
+    static func wordCount(_ blocks: [EditorBlock]) -> Int { StoryBlocks.wordCount(blocks.map(\.story)) }
+    static func readMinutes(_ blocks: [EditorBlock]) -> Int { StoryBlocks.readMinutes(blocks.map(\.story)) }
 }

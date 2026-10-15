@@ -12,22 +12,39 @@ final class StoryDocument {
     @ObservationIgnored var onBody: ((String) -> Void)?
     @ObservationIgnored private(set) var lastBody: String
 
-    init(body: String) {
-        var b = EditorBlocks.parse(body)
-        if b.isEmpty { b = [EditorBlock()] }
-        blocks = b
-        lastBody = EditorBlocks.serialize(b)
+    @ObservationIgnored private var loading = false
+    @ObservationIgnored private(set) var loaded = false
+
+    /// Cheap on purpose: SwiftUI may build this struct many times; the real parse happens in `load`.
+    init() {
+        blocks = [EditorBlock()]
+        lastBody = ""
+    }
+
+    /// Parse the draft body once. `lastBody` stays the body exactly as stored, so merely viewing a story never
+    /// rewrites (or dirties) it; the first edit writes the normalised Markdown.
+    func load(_ body: String) {
+        loaded = true
+        read(body)
     }
 
     /// Re-read from Markdown if it changed behind our back.
     func reload(from body: String) {
-        guard body != lastBody else { return }
+        guard loaded, body != lastBody else { return }
+        read(body)
+    }
+
+    private func read(_ body: String) {
+        loading = true
         var b = EditorBlocks.parse(body)
         if b.isEmpty { b = [EditorBlock()] }
         blocks = b
+        lastBody = body
+        loading = false
     }
 
     private func sync() {
+        guard !loading, loaded else { return }
         let md = EditorBlocks.serialize(blocks)
         guard md != lastBody else { return }
         lastBody = md
@@ -74,5 +91,4 @@ final class StoryDocument {
         blocks.contains { $0.id != id && $0.fileNames.contains { $0.caseInsensitiveCompare(name) == .orderedSame } }
     }
 
-    var wordCount: Int { EditorBlocks.wordCount(blocks) }
 }

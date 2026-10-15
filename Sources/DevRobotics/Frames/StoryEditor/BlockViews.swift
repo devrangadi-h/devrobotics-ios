@@ -51,7 +51,7 @@ struct AddMenu<Label: View>: View {
 }
 
 struct IssueBadge: View {
-    let issue: EditorIssue
+    let issue: PreviewIssue
     var body: some View {
         Label(issue.message, systemImage: issue.level == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
             .font(.footnote)
@@ -67,7 +67,7 @@ struct BlockRow: View {
     let block: EditorBlock
     let model: DraftEditorModel
     let doc: StoryDocument
-    let issues: [EditorIssue]
+    let issues: [PreviewIssue]
     let isFirst: Bool
     let isLast: Bool
     let onEdit: () -> Void

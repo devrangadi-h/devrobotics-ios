@@ -1,13 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// INTEGRATION: the coordinator asked for a trailing Done item calling `KeyboardDone.dismiss()`
-/// (Core/KeyboardDone.swift, not present in this worktree). This is the single place to swap.
-enum EditorKeyboard {
-    @MainActor static func dismiss() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-}
 
 /// Live Markdown styling: syntax characters stay visible but dimmed.
 enum MarkdownStyler {
@@ -143,6 +136,7 @@ struct LiveTextView: UIViewRepresentable {
         tv.smartDashesType = .no
         tv.smartInsertDeleteType = .no
         tv.spellCheckingType = .no
+        if let drop = tv.textDropInteraction { tv.removeInteraction(drop) } // block-reorder drags must not insert their payload as text
         tv.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         tv.textContainer.lineFragmentPadding = 0
         tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -221,7 +215,7 @@ struct LiveTextView: UIViewRepresentable {
         @objc func bullets() { apply { LineEdit.toggle($0, $1, prefix: "- ") } }
         @objc func numbered() { apply { LineEdit.toggle($0, $1, prefix: "1. ", numbered: true) } }
         @objc func quote() { apply { LineEdit.toggle($0, $1, prefix: "> ") } }
-        @objc func done() { EditorKeyboard.dismiss() }
+        @objc func done() { KeyboardDone.dismiss() }
 
         func textViewDidChange(_ tv: UITextView) {
             if tv.markedTextRange == nil {

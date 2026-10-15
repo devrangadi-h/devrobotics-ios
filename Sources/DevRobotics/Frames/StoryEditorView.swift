@@ -16,6 +16,8 @@ struct StoryEditorView: View {
     @State private var doc: StoryDocument
     @State private var bridge: StoryPreviewBridge?
     @State private var mode: Mode = .write
+    @Environment(SettingsStore.self) private var settings
+    @State private var counts = (words: 0, minutes: 0)
 
     @State private var insertIndex = 0
     @State private var showImagePicker = false
@@ -36,7 +38,7 @@ struct StoryEditorView: View {
 
     init(model: DraftEditorModel) {
         self.model = model
-        _doc = State(initialValue: StoryDocument(body: model.draft.body))
+        _doc = State(initialValue: StoryDocument())
     }
 
     var body: some View {
@@ -88,12 +90,11 @@ struct StoryEditorView: View {
             model?.draft.body = md
             bridge?.markChanged()
         }
-        if bridge == nil { bridge = StoryPreviewBridges.make(for: model) }
+        if !doc.loaded { doc.load(model.draft.body) }
+        if bridge == nil { bridge = StoryPreviewBridge(model: model, settings: settings) }
     }
 
-    private func modeChanged(_ m: Mode) {
-        if m == .preview, let b = bridge, b.isStale { b.refresh() }
-    }
+    private func modeChanged(_ m: Mode) {}
 
     private func pickers<V: View>(_ v: V) -> some View {
         v
@@ -151,20 +152,27 @@ struct StoryEditorView: View {
 
     // MARK: write
 
-    private var issueMap: (byBlock: [UUID: [EditorIssue]], unmapped: [EditorIssue]) {
+    private var issueMap: (byBlock: [UUID: [PreviewIssue]], unmapped: [PreviewIssue]) {
         guard let issues = bridge?.issues, !issues.isEmpty else { return ([:], []) }
-        let ranges = EditorBlocks.lineRanges(doc.blocks)
-        var map: [UUID: [EditorIssue]] = [:]
-        var rest: [EditorIssue] = []
+        let ranges = currentRanges
+        var map: [UUID: [PreviewIssue]] = [:]
+        var rest: [PreviewIssue] = []
         for i in issues {
             var target: UUID?
-            if i.kind == .missingFile, let n = i.name {
+            if i.kind == .missingFile, let n = i.fileName {
                 target = doc.blocks.first { $0.fileNames.contains { $0.caseInsensitiveCompare(n) == .orderedSame } }?.id
             }
-            if target == nil { target = ranges.first { $0.lines.contains(i.line) }?.id }
+            if target == nil { target = i.bodyLine.flatMap { l in ranges.first { $0.lines.contains(l) }?.id } }
             if let target { map[target, default: []].append(i) } else { rest.append(i) }
         }
         return (map, rest)
+    }
+
+    /// Block line ranges in the body the server will build from: the normalised serialization once edited,
+    /// the stored body (zipped by index) for an untouched draft; empty when they can't be trusted.
+    private var currentRanges: [(id: UUID, lines: ClosedRange<Int>)] {
+        if model.draft.body == EditorBlocks.serialize(doc.blocks) { return EditorBlocks.lineRanges(doc.blocks) }
+        return EditorBlocks.rawRanges(body: model.draft.body, blocks: doc.blocks) ?? []
     }
 
     private var writeView: some View {
@@ -174,9 +182,9 @@ struct StoryEditorView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     issueBanner(proxy: proxy)
                     cover
-                    TextField("Title", text: model.binding("title", suggestsSlug: true), axis: .vertical)
+                    TextField("Title", text: model.binding("title", suggestsSlug: true))
                         .font(.largeTitle.bold())
-                        .textInputAutocapitalization(.sentences)
+                        .textInputAutocapitalization(.sentences).submitLabel(.done)
                         .padding(.top, 8)
                     Text(model.draft.field("place").isEmpty ? "Add a place in Details" : model.draft.field("place"))
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -239,11 +247,16 @@ struct StoryEditorView: View {
     }
 
     private var footer: some View {
-        let w = doc.wordCount
-        let m = EditorBlocks.readMinutes(words: w)
+        let w = counts.words, m = counts.minutes
         return VStack(alignment: .leading, spacing: 2) {
             Text("\(w) words" + (m > 0 ? " · \(m) min read" : ""))
             Text("Saved on this phone · \(model.draft.updatedAt.formatted(date: .omitted, time: .shortened))")
+        }
+        .task(id: model.draft.body) {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            let blocks = doc.blocks
+            counts = (EditorBlocks.wordCount(blocks), EditorBlocks.readMinutes(blocks))
         }
         .font(.caption).foregroundStyle(.secondary).padding(.top, 16)
     }
@@ -252,9 +265,9 @@ struct StoryEditorView: View {
         if let issues = bridge?.issues, !issues.isEmpty {
             let hasErr = issues.contains { $0.level == .error }
             Button {
-                let ranges = EditorBlocks.lineRanges(doc.blocks)
-                let first = issues.sorted { $0.line < $1.line }.first
-                if let first, let t = ranges.first(where: { $0.lines.contains(first.line) })?.id {
+                let ranges = currentRanges
+                let first = issues.min { ($0.bodyLine ?? 0) < ($1.bodyLine ?? 0) }
+                if let first, let l = first.bodyLine, let t = ranges.first(where: { $0.lines.contains(l) })?.id {
                     withAnimation { proxy.scrollTo(t, anchor: .center) }
                 } else if first?.kind == .noDate {
                     detailsFocusDate = true; showDetails = true
@@ -286,16 +299,12 @@ struct StoryEditorView: View {
                     .onTapGesture { mode = .write }
             }
             if let b = bridge, b.unavailableReason == nil {
-                HStack {
-                    Text(b.isBuilding ? "Building…" : b.isStale ? "Out of date" : "Up to date")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Refresh") { b.refresh() }.font(.footnote.bold()).disabled(b.isBuilding)
-                }
-                .padding(.horizontal).padding(.vertical, 6)
                 b.makePreviewView()
             } else {
-                SmallBanner(text: bridge?.unavailableReason ?? "Approximate preview. The real page preview isn't available.")
+                SmallBanner(text: "Approximate preview. " + (bridge?.unavailableReason ?? "The real page preview isn't available."))
+                if let b = bridge {
+                    Button("Try the real preview") { b.refresh() }.font(.footnote.bold()).padding(.vertical, 6)
+                }
                 StoryPreview(model: model)
             }
         }
@@ -326,7 +335,7 @@ struct StoryEditorView: View {
     }
 
     private func exclusiveFiles(_ b: EditorBlock) -> [String] {
-        b.fileNames.filter { !doc.isFileUsed($0, excluding: b.id) && model.draft.allFiles.contains($0) }
+        b.fileNames.filter { $0 != model.draft.field("cover") && !doc.isFileUsed($0, excluding: b.id) && model.draft.allFiles.contains($0) }
     }
 
     private func requestDelete(_ b: EditorBlock) {
