@@ -4,28 +4,43 @@ import PhotosUI
 struct PhotoEditorView: View {
     @Bindable var model: DraftEditorModel
     @State private var item: PhotosPickerItem?
+    @State private var pickedCount = 0
 
     var body: some View {
         Form {
             Section {
-                if let name = model.draft.thumbName {
-                    FocusImage(source: model.source(for: name), focus: model.binding("focus"))
-                        .listRowInsets(EdgeInsets())
-                    Text("Tap the photo to set where the square crop is centred.").font(.caption).foregroundStyle(.secondary)
+                VStack(spacing: DS.Space.m) {
+                    if let name = model.draft.thumbName {
+                        PhotoFocusPicker(source: model.source(for: name), focus: model.binding("focus"))
+                            .transition(.scale(scale: 0.96).combined(with: .opacity))
+                        Label("Tap or drag to choose the centre of the square crop.", systemImage: "scope")
+                            .font(Theme.font(12, relativeTo: .caption)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    PhotosPicker(selection: $item, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
+                        Label(model.draft.thumbName == nil ? "Choose photo" : "Replace photo",
+                              systemImage: "photo.badge.plus")
+                    }
+                    .buttonStyle(PhotoPickButtonStyle(secondary: model.draft.thumbName != nil))
+                    if model.busy {
+                        HStack { ProgressView(); Text("Reading original…").font(.footnote).foregroundStyle(.secondary) }
+                    }
+                    if let n = model.draft.thumbName {
+                        Text("\(n) · original, unmodified")
+                            .font(Theme.font(11, mono: true, relativeTo: .caption2)).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
                 }
-                PhotosPicker(selection: $item, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
-                    Label(model.draft.thumbName == nil ? "Choose photo" : "Replace photo", systemImage: "photo.badge.plus")
-                }
-                if model.busy { ProgressView("Reading original…") }
-                if let n = model.draft.thumbName {
-                    Text("\(n) • original, unmodified").font(.caption).foregroundStyle(.secondary)
-                }
+                .listRowInsets(EdgeInsets(top: DS.Space.m, leading: DS.Space.l, bottom: DS.Space.m, trailing: DS.Space.l))
+                .listRowBackground(Color.clear)
             }
             Section("Details") {
                 TextField("Place (required)", text: model.binding("place", suggestsSlug: true))
                 SlugRow(model: model)
-                GPSRow(model: model)
                 TextField("Alt text (describe the photo)", text: model.binding("alt"), axis: .vertical)
+            }
+            Section("Options") {
+                GPSRow(model: model)
                 DateRow(model: model)
             }
             Section("Note") {
@@ -35,11 +50,20 @@ struct PhotoEditorView: View {
             }
             let problems = model.draft.lastError != nil || !model.draft.problems.isEmpty
             if problems { Section("Problems") { ProblemsView(draft: model.draft) } }
-            let v = model.draft.validation
-            if !v.isEmpty {
-                Section("Before sending") { ForEach(v, id: \.self) { Label($0, systemImage: "info.circle").font(.callout) } }
+            Section("Before sending") {
+                let v = model.draft.validation
+                if v.isEmpty {
+                    Label("Ready to send", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.ok)
+                        .symbolEffect(.bounce, value: v.isEmpty)
+                } else {
+                    ForEach(v, id: \.self) { Label($0, systemImage: "circle.dashed").font(.callout).foregroundStyle(Theme.warn) }
+                }
             }
         }
+        .dsPage()
+        .dsAnimation(value: model.draft.thumbName)
+        .dsAnimation(.dsSnappy, value: model.draft.validation)
+        .sensoryFeedback(.success, trigger: pickedCount)
         .onChange(of: item) { _, new in
             guard let new else { return }
             Task { await pick(new) }
@@ -57,8 +81,25 @@ struct PhotoEditorView: View {
             if media.isVideo { try? FileManager.default.removeItem(at: media.url); model.error = "Pick a photo, not a video."; return }
             model.add(media)
             model.draft.fields["focus"] = nil
+            pickedCount += 1
         } catch {
             model.error = error.localizedDescription
         }
+    }
+}
+
+/// Pick button (tinted primary, or plain glass once a photo exists), local to the photo editor.
+private struct PhotoPickButtonStyle: ButtonStyle {
+    var secondary = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Theme.font(15, weight: .semibold, relativeTo: .body))
+            .foregroundStyle(secondary ? Theme.accent : Theme.accentContrast)
+            .padding(.vertical, DS.Space.m)
+            .frame(maxWidth: .infinity)
+            .glassEffect(secondary ? .regular.interactive() : .regular.tint(Theme.accent).interactive(),
+                         in: .rect(cornerRadius: DS.Radius.control))
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.dsSnappy, value: configuration.isPressed)
     }
 }
