@@ -63,35 +63,75 @@ struct IssueBadge: View {
     }
 }
 
-/// One block in the document: content + drag handle + menu + issue badges.
+/// Inline badge for a problem on a block: errors red, warnings amber, with a button for the first fix.
+struct ProblemBadge: View {
+    let problem: FrameProblem
+    var onFix: ((FrameProblem.Fix) -> Void)?
+
+    static func fixLabel(_ f: FrameProblem.Fix) -> String {
+        switch f {
+        case .setDate: "Set a date"
+        case .insertFile: "Insert as photo"
+        case .removeFile: "Remove file"
+        case .removeBlock: "Remove block"
+        case .showText: "Show text"
+        case .openDetails: "Open details"
+        }
+    }
+
+    var body: some View {
+        let err = problem.severity == .error
+        let tint = err ? Color.red : Theme.warn
+        VStack(alignment: .leading, spacing: 4) {
+            Label(problem.title, systemImage: err ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .font(Theme.font(13, weight: .medium, relativeTo: .footnote))
+                .foregroundStyle(tint)
+            if let fix = problem.fixes.first, let onFix {
+                Button(Self.fixLabel(fix)) { onFix(fix) }.font(.footnote.bold())
+            }
+        }
+        .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(tint.opacity(0.22)), in: .rect(cornerRadius: DS.Radius.chip))
+    }
+}
+
+/// One block in the document: content + drag handle + menu + problem badges.
 struct BlockRow: View {
     let block: EditorBlock
     let model: DraftEditorModel
     let doc: StoryDocument
-    let issues: [PreviewIssue]
+    let problems: [FrameProblem]
+    var highlighted = false
     let isFirst: Bool
     let isLast: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
-    let onSetDate: () -> Void
+    let onFix: (FrameProblem.Fix) -> Void
+    let onDropFile: (String) -> Void
     @State private var moved = 0
 
     var body: some View {
         HStack(alignment: .top, spacing: DS.Space.s) {
             VStack(alignment: .leading, spacing: 6) {
                 content
-                ForEach(issues) { i in
-                    IssueBadge(issue: i)
-                    if i.kind == .noDate {
-                        Button("Set a date", action: onSetDate).font(.footnote.bold())
-                    }
+                ForEach(problems) { ProblemBadge(problem: $0, onFix: onFix) }
+            }
+            .padding(highlighted ? 6 : 0)
+            .background {
+                if highlighted {
+                    RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).fill(Theme.accent.opacity(0.18))
                 }
             }
+            .padding(highlighted ? -6 : 0)
+            .animation(.easeInOut(duration: 0.25), value: highlighted)
             controls
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: moved)
         .dropDestination(for: String.self) { items, _ in
-            guard let s = items.first, let id = UUID(uuidString: s) else { return false }
+            guard let s = items.first else { return false }
+            if s.hasPrefix("file:") { onDropFile(String(s.dropFirst(5))); return true }
+            guard let id = UUID(uuidString: s) else { return false }
             doc.move(id, before: block.id)
             moved += 1
             return true
@@ -126,7 +166,22 @@ struct BlockRow: View {
     }
 
     @ViewBuilder private var content: some View {
-        if block.isMedia {
+        if block.media == .clip, let name = block.items.first?.name, model.draft.allFiles.contains(name) {
+            // not wrapped in a Button: the card owns tap-to-play
+            ClipCardView(model: model, name: name, trimmed: false)
+                .overlay(alignment: .bottomLeading) {
+                    Button(action: onEdit) {
+                        let note = block.items.first?.note ?? ""
+                        Label(note.isEmpty ? "Add a note" : note, systemImage: "text.bubble")
+                            .lineLimit(2)
+                            .font(Theme.font(13, weight: .medium, relativeTo: .footnote))
+                            .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
+                            .glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.chip))
+                            .padding(DS.Space.s)
+                    }
+                    .buttonStyle(.plain)
+                }
+        } else if block.isMedia {
             Button(action: onEdit) { MediaCard(block: block, model: model) }.buttonStyle(.plain)
         } else {
             LiveTextView(text: doc.text(for: block.id),

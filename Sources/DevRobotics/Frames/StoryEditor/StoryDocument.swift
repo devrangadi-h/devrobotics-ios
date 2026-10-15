@@ -9,6 +9,8 @@ final class StoryDocument {
         didSet { sync() }
     }
     var focusID: UUID?
+    /// The text block most recently typed in (stand-in for "the focused block" when inserting from the unused tray).
+    @ObservationIgnored private(set) var lastEditedTextID: UUID?
     @ObservationIgnored var onBody: ((String) -> Void)?
     @ObservationIgnored private(set) var lastBody: String
 
@@ -56,7 +58,10 @@ final class StoryDocument {
     func text(for id: UUID) -> Binding<String> {
         Binding(get: { self.blocks.first { $0.id == id }?.text ?? "" },
                 set: { new in
-                    if let i = self.index(of: id), self.blocks[i].text != new { self.blocks[i].text = new }
+                    if let i = self.index(of: id), self.blocks[i].text != new {
+                        self.lastEditedTextID = id
+                        self.blocks[i].text = new
+                    }
                 })
     }
 
@@ -67,6 +72,12 @@ final class StoryDocument {
 
     func insert(_ b: EditorBlock, at index: Int) {
         blocks.insert(b, at: min(max(index, 0), blocks.count))
+    }
+
+    /// Index just after the last-edited text block, else the end.
+    var insertionIndexForTray: Int {
+        if let id = lastEditedTextID, let i = index(of: id) { return i + 1 }
+        return blocks.count
     }
 
     func remove(_ id: UUID) {

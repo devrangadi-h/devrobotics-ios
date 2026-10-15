@@ -90,12 +90,11 @@ struct StoryDetailsSheet: View {
             ScrollViewReader { proxy in
                 Form {
                     Section {
-                        TextField("Place (required)", text: model.binding("place"))
                         DateRow(model: model).id("date")
                         GPSRow(model: model)
                     } header: {
-                        Label("Where and when", systemImage: "mappin.and.ellipse")
-                    } footer: { Text("Shown under the title on the story page.") }
+                        Label("When and where", systemImage: "calendar")
+                    } footer: { Text("Edit the title and place on the cover.") }
                     Section {
                         TextField("Summary (one line)", text: model.binding("summary"), axis: .vertical)
                         TextField("Cover alt text", text: model.binding("alt"), axis: .vertical)

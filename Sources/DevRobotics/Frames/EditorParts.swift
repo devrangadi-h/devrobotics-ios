@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 
 /// Shared bits for the photo and story editors.
 
@@ -31,24 +32,62 @@ struct GPSRow: View {
     }
 }
 
-struct DateRow: View {
-    @Bindable var model: DraftEditorModel
-    private static let fmt: DateFormatter = {
+/// Date helpers shared by the Date row and the set-date flow.
+enum StoryDates {
+    static let fmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 
+    /// Date taken from EXIF/TIFF metadata (not the file's import time); nil when unreadable.
+    static func taken(at url: URL) -> Date? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return nil }
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        let raw = (exif?[kCGImagePropertyExifDateTimeOriginal] as? String) ?? (tiff?[kCGImagePropertyTIFFDateTime] as? String)
+        guard let raw else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        return f.date(from: raw)
+    }
+
+    /// Where the set-date calendar starts: the stored date, else the cover's (or first file's) date taken, else today.
+    @MainActor static func initial(for model: DraftEditorModel) -> Date {
+        if let d = fmt.date(from: model.draft.field("date")) { return d }
+        let cover = model.draft.field("cover")
+        let names = ([cover] + model.draft.localFiles).filter { !$0.isEmpty && model.draft.localFiles.contains($0) }
+        for n in names { if let d = taken(at: model.mediaURL(n)) { return d } }
+        return Date()
+    }
+}
+
+/// "Date: From the photo" / "Set manually: 14 Oct 2026"; tapping opens the set-date sheet.
+struct DateRow: View {
+    @Bindable var model: DraftEditorModel
+    @State private var showSheet = false
+
     var body: some View {
-        let has = !model.draft.field("date").isEmpty
-        Toggle("Override date", isOn: Binding(get: { has }, set: { on in
-            model.draft.fields["date"] = on ? Self.fmt.string(from: Date()) : ""
-        }))
-        if has {
-            DatePicker("Date", selection: Binding(
-                get: { Self.fmt.date(from: model.draft.field("date")) ?? Date() },
-                set: { model.draft.fields["date"] = Self.fmt.string(from: $0) }), displayedComponents: .date)
+        let stored = model.draft.field("date")
+        let manual = StoryDates.fmt.date(from: stored)
+        Button { showSheet = true } label: {
+            LabeledContent("Date") {
+                Text(manual.map { "Set manually: " + $0.formatted(.dateTime.day().month(.abbreviated).year()) } ?? "From the photo")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showSheet) {
+            SetDateSheet(initial: StoryDates.initial(for: model)) { d in
+                model.draft.fields["date"] = StoryDates.fmt.string(from: d)
+            }
+            .presentationDetents([.medium, .large])
+        }
+        if manual != nil {
+            Button("Use the photo's date") { model.draft.fields["date"] = "" }.font(.footnote)
         }
     }
 }
