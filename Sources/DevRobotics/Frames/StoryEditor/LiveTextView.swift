@@ -177,27 +177,74 @@ struct LiveTextView: UIViewRepresentable {
         weak var tv: UITextView?
         init(_ p: LiveTextView) { parent = p }
 
+        /// Formatting bar above the keyboard. Formatting buttons scroll horizontally if the screen is narrow;
+        /// Done is pinned to the trailing edge so it can never be pushed off-screen.
         func makeAccessory(for tv: UITextView) -> UIView {
             self.tv = tv
-            let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-            func item(_ icon: String, _ label: String, _ sel: Selector) -> UIBarButtonItem {
-                let b = UIBarButtonItem(image: UIImage(systemName: icon), style: .plain, target: self, action: sel)
+            let container = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 52))
+            container.autoresizingMask = [.flexibleWidth]
+
+            let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+            blur.frame = container.bounds
+            blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            container.addSubview(blur)
+
+            func formatButton(_ icon: String, _ label: String, _ sel: Selector) -> UIButton {
+                var cfg = UIButton.Configuration.plain()
+                cfg.image = UIImage(systemName: icon)
+                cfg.baseForegroundColor = .label
+                let b = UIButton(configuration: cfg)
                 b.accessibilityLabel = label
+                b.addTarget(self, action: sel, for: .touchUpInside)
+                b.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([b.widthAnchor.constraint(equalToConstant: 44),
+                                             b.heightAnchor.constraint(equalToConstant: 44)])
                 return b
             }
-            bar.items = [
-                item("bold", "Bold", #selector(bold)),
-                item("italic", "Italic", #selector(italic)),
-                item("link", "Link", #selector(link)),
-                item("textformat.size", "Heading", #selector(heading)),
-                item("list.bullet", "Bullets", #selector(bullets)),
-                item("list.number", "Numbered list", #selector(numbered)),
-                item("text.quote", "Quote", #selector(quote)),
-                UIBarButtonItem(systemItem: .flexibleSpace),
-                UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(done)),
-            ]
-            bar.sizeToFit()
-            return bar
+            let stack = UIStackView(arrangedSubviews: [
+                formatButton("bold", "Bold", #selector(bold)),
+                formatButton("italic", "Italic", #selector(italic)),
+                formatButton("link", "Link", #selector(link)),
+                formatButton("textformat.size", "Heading", #selector(heading)),
+                formatButton("list.bullet", "Bullets", #selector(bullets)),
+                formatButton("list.number", "Numbered list", #selector(numbered)),
+                formatButton("text.quote", "Quote", #selector(quote)),
+            ])
+            stack.axis = .horizontal
+            stack.spacing = 2
+            stack.translatesAutoresizingMaskIntoConstraints = false
+
+            let scroll = UIScrollView()
+            scroll.showsHorizontalScrollIndicator = false
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            scroll.addSubview(stack)
+
+            var doneCfg = UIButton.Configuration.prominentGlass()
+            doneCfg.title = "Done"
+            doneCfg.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+            let done = UIButton(configuration: doneCfg)
+            done.accessibilityLabel = "Done"
+            done.addTarget(self, action: #selector(self.done), for: .touchUpInside)
+            done.setContentHuggingPriority(.required, for: .horizontal)
+            done.setContentCompressionResistancePriority(.required, for: .horizontal)
+            done.translatesAutoresizingMaskIntoConstraints = false
+
+            container.addSubview(scroll)
+            container.addSubview(done)
+            NSLayoutConstraint.activate([
+                done.trailingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+                done.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                scroll.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor, constant: 8),
+                scroll.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8),
+                scroll.topAnchor.constraint(equalTo: container.topAnchor),
+                scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+                stack.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+            ])
+            return container
         }
 
         private func apply(_ edit: (String, NSRange) -> FrameFormat.Edit) {
