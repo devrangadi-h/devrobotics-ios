@@ -8,6 +8,7 @@ struct RootView: View {
     /// `-screen <name>` (demo/screenshots) can start on any tab.
     private static var initialTab: AppTab {
         switch DemoMode.screen {
+        case "status": return .status
         case "lights": return .lights
         case "frames", "story", "photo", "publish", "storyproblems": return .frames
         case "settings", "about": return .settings

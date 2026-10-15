@@ -78,7 +78,7 @@ struct SettingsView: View {
                                     ProgressView()
                                 } else if let result {
                                     Image(systemName: result.ok ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                                        .foregroundStyle(result.ok ? Theme.ok : Color.red)
+                                        .foregroundStyle(result.ok ? Theme.ok : Theme.danger)
                                         .symbolEffect(.bounce, value: resultTick)
                                         .transition(.scale.combined(with: .opacity))
                                 } else {
@@ -86,13 +86,13 @@ struct SettingsView: View {
                                 }
                             }
                             .frame(width: 24, height: 24)
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: DS.Space.hair) {
                                 Text(testing ? "Testing…" : "Test connection")
                                     .font(Theme.font(16, weight: .medium))
                                 if let result, !testing {
                                     Text(result.text)
                                         .font(Theme.font(13, relativeTo: .footnote))
-                                        .foregroundStyle(result.ok ? Theme.ok : Color.red)
+                                        .foregroundStyle(result.ok ? Theme.ok : Theme.danger)
                                         .transition(.opacity)
                                 }
                             }
@@ -175,6 +175,7 @@ struct SettingsView: View {
                 }
                 .disabled(clearing)
                 .sensoryFeedback(.success, trigger: clearedTick)
+                .sensoryFeedback(.error, trigger: cacheError) { _, new in new != nil }
             } else if let cacheError {
                 Label(cacheError, systemImage: "exclamationmark.triangle")
                     .font(Theme.font(14, relativeTo: .subheadline)).foregroundStyle(.secondary)
@@ -271,17 +272,18 @@ private struct SettingsHeaderCard: View {
     var connected: Bool
     @Environment(SettingsStore.self) private var settings
     @State private var expiry = ExpiryInfo.current()
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         GlassCard {
-            HStack(spacing: DS.Space.l) {
+            AdaptiveStack(spacing: DS.Space.l) {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(Theme.accentContrast)
                     .frame(width: 56, height: 56)
                     .background(
                         LinearGradient(colors: [Theme.accent, Theme.accentStrong], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: .rect(cornerRadius: 14))
+                        in: .rect(cornerRadius: DS.Radius.chip))
                 VStack(alignment: .leading, spacing: DS.Space.xs) {
                     Text("DevRobotics").font(Theme.font(20, weight: .semibold, relativeTo: .title3)).lineLimit(1)
                     Text(settings.isConfigured ? settings.host : "Not configured")
@@ -290,12 +292,14 @@ private struct SettingsHeaderCard: View {
                     let rem = expiry.remaining()
                     let lvl = ExpiryMath.level(remaining: rem)
                     GlassPill(text: ExpiryMath.chipText(rem), systemImage: lvl == .ok ? "clock" : "exclamationmark.triangle",
-                              tint: lvl == .ok ? nil : (lvl == .soon ? Theme.warn : Color.red).opacity(0.4))
+                              tint: lvl == .ok ? nil : (lvl == .soon ? Theme.warn : Theme.danger).opacity(0.4))
                         .fixedSize()
                 }
-                Spacer(minLength: 0)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if connected { GlassPill(text: "Online", systemImage: "checkmark", tint: Theme.ok.opacity(0.4)).fixedSize() }
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                if !typeSize.isAccessibilitySize {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.vertical, DS.Space.xs)
