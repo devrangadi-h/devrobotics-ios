@@ -6,7 +6,9 @@ struct LightsView: View {
     @State private var model = LightsModel()
     @State private var lampsExpanded = true
     @State private var naming = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var sceneName = ""
+    @State private var sceneToDelete: LightScene?
     @State private var pickerColor = Color.white
     @Namespace private var glassNS
 
@@ -35,7 +37,7 @@ struct LightsView: View {
                 }
                 .padding(.horizontal, DS.Space.l)
                 .padding(.top, DS.Space.s)
-                .padding(.bottom, 120)
+                .padding(.bottom, DS.Space.tabBar)
             }
             .dsPage()
             .background { ambientGlow }
@@ -54,6 +56,16 @@ struct LightsView: View {
             }
             .sensoryFeedback(.error, trigger: model.sendTick) { _, _ in
                 if case .failed = model.banner { return true } else { return false }
+            }
+            .confirmationDialog("Delete scene?", isPresented: Binding(get: { sceneToDelete != nil },
+                                                                     set: { if !$0 { sceneToDelete = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete scene", role: .destructive) {
+                    if let scene = sceneToDelete { withAnimation(.dsSpring) { model.deleteScene(scene) } }
+                    sceneToDelete = nil
+                }
+            } message: {
+                Text("\"\(sceneToDelete?.name ?? "This scene")\" will be removed. This can't be undone.")
             }
             .alert("Save scene", isPresented: $naming) {
                 TextField("Name", text: $sceneName)
@@ -94,12 +106,14 @@ struct LightsView: View {
     private var statusWindow: some View {
         GlassCard(tint: model.anyOn ? color.opacity(0.28) : nil) {
             VStack(alignment: .leading, spacing: DS.Space.m) {
-                HStack(spacing: DS.Space.s) {
-                    LightsLiveDot(color: reachColor, live: model.reach == .up)
-                    Text(reachText)
-                        .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
-                        .contentTransition(.interpolate)
-                    Spacer()
+                AdaptiveStack(spacing: DS.Space.s) {
+                    HStack(spacing: DS.Space.s) {
+                        LightsLiveDot(color: reachColor, live: model.reach == .up)
+                        Text(reachText)
+                            .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
+                            .contentTransition(.interpolate)
+                    }
+                    if !typeSize.isAccessibilitySize { Spacer() }
                     if model.reach == .down {
                         Button { Task { await model.ping(api) } } label: {
                             Label("Retry", systemImage: "arrow.clockwise")
@@ -130,7 +144,7 @@ struct LightsView: View {
                             }
                     }
                     .frame(width: 70, height: 70)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DS.Space.hair) {
                         HStack(alignment: .firstTextBaseline, spacing: DS.Space.s) {
                             Text(model.anyOn ? "On" : "Off")
                                 .font(Theme.font(28, weight: .bold, relativeTo: .title))
@@ -151,12 +165,12 @@ struct LightsView: View {
                 if let end = model.timerEndsAt, model.supports("timer") {
                     TimelineView(.periodic(from: .now, by: 1)) { ctx in
                         let left = max(0, Int(end.timeIntervalSince(ctx.date)))
-                        HStack(spacing: DS.Space.s) {
+                        AdaptiveStack(spacing: DS.Space.s) {
                             Image(systemName: "moon.zzz.fill").symbolEffect(.pulse)
                             Text("Turns off in \(String(format: "%d:%02d", left / 60, left % 60))")
                                 .font(Theme.font(14, weight: .medium, mono: true, relativeTo: .subheadline))
                                 .contentTransition(.numericText(countsDown: true))
-                            Spacer()
+                            if !typeSize.isAccessibilitySize { Spacer() }
                             Button("Cancel") { model.cancelTimer(api) }
                                 .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
                                 .buttonStyle(.glass)
@@ -187,9 +201,9 @@ struct LightsView: View {
 
     private var masterToggle: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DS.Space.hair) {
                 Text("All lights").font(Theme.font(20, weight: .semibold, relativeTo: .title3))
-                Text(model.busy ? "Sending..." : (model.anyOn ? "Tap to turn off" : "Tap to turn on"))
+                Text(model.busy ? "Sending…" : (model.anyOn ? "Tap to turn off" : "Tap to turn on"))
                     .font(Theme.font(13, relativeTo: .footnote)).foregroundStyle(.secondary)
                     .contentTransition(.interpolate)
             }
@@ -320,11 +334,11 @@ struct LightsView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, DS.Space.m)
             .glassEffect(.regular.tint(tint.opacity(selected ? 0.55 : 0.15)).interactive(),
-                         in: .rect(cornerRadius: DS.Radius.card))
+                         in: .rect(cornerRadius: DS.Radius.control))
             .glassEffectID(name, in: glassNS)
             .overlay(alignment: .topTrailing) {
                 if selected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.text).padding(8)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.text).padding(DS.Space.s)
                         .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -360,7 +374,7 @@ struct LightsView: View {
                         .disabled(!enabled)
                         .accessibilityLabel("Save current as scene")
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, DS.Space.hair)
                 }
             }
             .scrollClipDisabled()
@@ -387,7 +401,7 @@ struct LightsView: View {
         .contextMenu {
             if !scene.builtIn {
                 Button("Delete", systemImage: "trash", role: .destructive) {
-                    withAnimation(.dsSpring) { model.deleteScene(scene) }
+                    sceneToDelete = scene
                 }
             }
         }
@@ -486,12 +500,12 @@ struct LightsView: View {
             switch model.banner {
             case .none: Color.clear.frame(height: 0)
             case .working:
-                GlassPill(text: "Sending...", systemImage: "paperplane.fill").symbolEffect(.pulse)
+                GlassPill(text: "Sending…", systemImage: "paperplane.fill").symbolEffect(.pulse)
             case .ok(let m):
                 GlassPill(text: m, systemImage: "checkmark.circle.fill", tint: Theme.ok.opacity(0.4))
                     .symbolEffect(.bounce, value: model.sendTick)
             case .failed(let m):
-                GlassPill(text: m, systemImage: "exclamationmark.triangle.fill", tint: .red.opacity(0.4))
+                GlassPill(text: m, systemImage: "exclamationmark.triangle.fill", tint: Theme.danger.opacity(0.4))
                     .symbolEffect(.bounce, value: model.sendTick)
             }
         }
@@ -508,11 +522,11 @@ struct LightsView: View {
     }
 
     private var reachColor: Color {
-        switch model.reach { case .up: Theme.ok; case .down: .red; default: .gray }
+        switch model.reach { case .up: Theme.ok; case .down: Theme.danger; default: .gray }
     }
     private var reachText: String {
         switch model.reach {
-        case .unknown: "Not checked"; case .checking: "Checking..."
+        case .unknown: "Not checked"; case .checking: "Checking…"
         case .up: "Pi reachable"; case .down: "Pi unreachable"
         }
     }

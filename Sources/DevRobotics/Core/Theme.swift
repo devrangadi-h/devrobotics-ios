@@ -25,6 +25,8 @@ enum Theme {
     static let muted = dyn(0x5b606a, 0x8a8f98)
     static let ok = dyn(0x15803d, 0x4ade80)
     static let warn = dyn(0xb45309, 0xfbbf24)
+    /// Errors and destructive states. Use instead of `.red`.
+    static let danger = dyn(0xb91c1c, 0xf87171)
 
     // MARK: Fonts
 

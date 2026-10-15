@@ -97,7 +97,7 @@ struct AboutView: View {
         switch ExpiryMath.level(remaining: model.remaining) {
         case .ok: Theme.ok
         case .soon: Theme.warn
-        case .urgent, .expired: .red
+        case .urgent, .expired: Theme.danger
         }
     }
 
@@ -232,7 +232,7 @@ struct AboutView: View {
             EmptyView()
         } label: {
             Label {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: DS.Space.hair) {
                     Text(name).font(Theme.font(15, weight: .medium, relativeTo: .subheadline))
                     Text(detail).font(Theme.font(12, relativeTo: .caption)).foregroundStyle(.secondary)
                 }

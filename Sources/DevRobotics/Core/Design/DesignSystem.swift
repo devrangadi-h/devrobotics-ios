@@ -3,12 +3,16 @@ import SwiftUI
 /// Shared design tokens. Rules live in docs/design.md; read them before styling anything.
 enum DS {
     enum Space {
+        /// Hairline gap between a title and its subtitle in a tight text stack.
+        static let hair: CGFloat = 2
         static let xs: CGFloat = 4
         static let s: CGFloat = 8
         static let m: CGFloat = 12
         static let l: CGFloat = 16
         static let xl: CGFloat = 24
         static let xxl: CGFloat = 32
+        /// Bottom content inset that clears the floating tab bar on scrolling tab roots.
+        static let tabBar: CGFloat = 120
     }
     enum Radius {
         static let chip: CGFloat = 14
@@ -203,6 +207,22 @@ extension ButtonStyle where Self == SecondaryActionStyle {
 }
 
 // MARK: - Layout helpers
+
+/// A row that stacks vertically at accessibility text sizes so labels and chips never break mid-word.
+/// Put a trailing `Spacer` behind `if !isStacked` (read `dynamicTypeSize.isAccessibilitySize`).
+struct AdaptiveStack<Content: View>: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var alignment: VerticalAlignment = .center
+    var spacing: CGFloat = DS.Space.m
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: spacing))
+            : AnyLayout(HStackLayout(alignment: alignment, spacing: spacing))
+        layout { content() }
+    }
+}
 
 /// Small section header used above groups of content.
 struct SectionTitle: View {

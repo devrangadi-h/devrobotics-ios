@@ -93,7 +93,7 @@ struct FanCard: View {
 
     private func readout(_ s: FanState) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DS.Space.l) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DS.Space.hair) {
                 Text(s.rpm.map { $0.formatted() } ?? "\u{2013}")
                     .font(Theme.font(30, weight: .semibold, mono: true, relativeTo: .title))
                     .foregroundStyle(Theme.accent)
@@ -101,7 +101,7 @@ struct FanCard: View {
                     .minimumScaleFactor(0.6).lineLimit(1)
                 Text("RPM").font(Theme.font(11, weight: .medium, relativeTo: .caption2)).foregroundStyle(.secondary)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DS.Space.hair) {
                 Text(s.tempC.map { String(format: "%.1f\u{00B0}C", $0) } ?? "\u{2013}")
                     .font(Theme.font(30, weight: .semibold, mono: true, relativeTo: .title))
                     .contentTransition(.numericText())

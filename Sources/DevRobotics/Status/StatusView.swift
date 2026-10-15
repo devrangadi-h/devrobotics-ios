@@ -39,6 +39,7 @@ struct StatusView: View {
     @State private var appeared = false
     @State private var refreshTick = 0
     @State private var selectedTime: Date?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         NavigationStack {
@@ -55,7 +56,7 @@ struct StatusView: View {
                 }
                 .padding(.horizontal, DS.Space.l)
                 .padding(.top, DS.Space.s)
-                .padding(.bottom, 110)   // clear the floating tab bar
+                .padding(.bottom, DS.Space.tabBar)   // clear the floating tab bar
             }
             .dsPage()
             .navigationTitle("Status")
@@ -157,14 +158,14 @@ struct StatusView: View {
         let label = online ? "Online" : (stale ? "Stale" : "Offline")
         return GlassCard(tint: tint.opacity(0.12)) {
             VStack(alignment: .leading, spacing: DS.Space.m) {
-                HStack(alignment: .center, spacing: DS.Space.m) {
+                AdaptiveStack {
                     Image(systemName: "cpu")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Theme.accent)
                         .symbolRenderingMode(.hierarchical)
                         .frame(width: 44, height: 44)
                         .background(Theme.accent.opacity(0.14), in: .rect(cornerRadius: DS.Radius.chip))
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DS.Space.hair) {
                         Text(s.hostname ?? "polaris")
                             .font(Theme.font(24, weight: .bold, relativeTo: .title2))
                             .lineLimit(2).minimumScaleFactor(0.7)
@@ -174,9 +175,9 @@ struct StatusView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Spacer(minLength: 0)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 }
-                HStack(spacing: DS.Space.m) {
+                AdaptiveStack {
                     StatusLivePill(text: label, color: tint, pulsing: online && !reduceMotion)
                     if let up = s.uptimeSeconds {
                         Label("Up \(Self.uptime(up))", systemImage: "clock")
@@ -207,12 +208,12 @@ struct StatusView: View {
             let shown = selected ?? pts[pts.count - 1]
             GlassCard {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
-                    HStack(alignment: .firstTextBaseline) {
+                    AdaptiveStack(alignment: .firstTextBaseline) {
                         Label("CPU temperature", systemImage: "thermometer.medium")
                             .font(Theme.font(12, weight: .semibold, relativeTo: .caption))
                             .foregroundStyle(.secondary)
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 0) {
+                        if !typeSize.isAccessibilitySize { Spacer() }
+                        VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 0) {
                             Text(String(format: "%.1f \u{00B0}C", shown.1))
                                 .font(Theme.font(20, weight: .semibold, mono: true, relativeTo: .title3))
                                 .contentTransition(.numericText())
@@ -288,7 +289,7 @@ struct StatusView: View {
 
     private func tempTint(_ t: Double?) -> Color {
         guard let t else { return Theme.accent }
-        return t >= 75 ? .red : (t >= 65 ? Theme.warn : Theme.accent)
+        return t >= 75 ? Theme.danger : (t >= 65 ? Theme.warn : Theme.accent)
     }
 
     private func percent(_ u: PiStatus.Usage?) -> String? {
@@ -377,7 +378,7 @@ private struct StatusLivePill: View {
     var pulsing: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DS.Space.s) {
             ZStack {
                 if pulsing {
                     Circle().fill(color).frame(width: 10, height: 10)
@@ -388,10 +389,10 @@ private struct StatusLivePill: View {
                 Circle().fill(color).frame(width: 10, height: 10)
             }
             .frame(width: 14, height: 14)
-            Text(text).font(Theme.font(14, weight: .semibold, relativeTo: .subheadline))
+            Text(text).font(Theme.font(14, weight: .semibold, relativeTo: .subheadline)).lineLimit(1).fixedSize()
         }
         .padding(.horizontal, DS.Space.m)
-        .padding(.vertical, 8)
+        .padding(.vertical, DS.Space.s)
         .glassEffect(.regular.tint(color.opacity(0.25)), in: .capsule)
         .accessibilityLabel("Status \(text)")
     }
