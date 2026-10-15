@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     enum AppTab: Hashable { case status, lights, frames, settings }
     @State private var tab: AppTab = RootView.initialTab
+    @State private var demoDateSheet = DemoMode.screen == "setdate"   // screenshots only
 
     /// `-screen <name>` (demo/screenshots) can start on any tab.
     private static var initialTab: AppTab {
@@ -24,5 +25,6 @@ struct RootView: View {
         .tabBarMinimizeBehavior(.onScrollDown)
         .sensoryFeedback(.selection, trigger: tab)
         .scrollDismissesKeyboard(.interactively)
+        .sheet(isPresented: $demoDateSheet) { SetDateSheet(initial: Date()) { _ in } }
     }
 }

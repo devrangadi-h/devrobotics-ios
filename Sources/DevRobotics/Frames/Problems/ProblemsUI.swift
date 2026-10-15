@@ -145,8 +145,12 @@ struct SetDateSheet: View {
             }
             .buttonStyle(.primaryAction)
         }
-        .padding(DS.Space.l)
-        .presentationDetents([.height(560), .large])
+        .padding(.horizontal, DS.Space.l)
+        .padding(.top, DS.Space.xl + DS.Space.s)   // clear the drag indicator
+        .padding(.bottom, DS.Space.xl)
+        .frame(maxHeight: .infinity, alignment: .center)   // content centred in the sheet, no dead strip below
+        .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(.thickMaterial)            // legible over photos behind the sheet
     }
 }
