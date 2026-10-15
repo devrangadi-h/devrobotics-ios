@@ -110,7 +110,7 @@ struct FilesSection: View {
             if model.draft.allFiles.isEmpty { Text("No files yet.").foregroundStyle(.secondary) }
             ForEach(model.draft.allFiles, id: \.self) { n in
                 HStack {
-                    FrameThumb(source: model.source(for: n)).frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 6))
+                    FrameThumb(source: model.source(for: n)).frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     VStack(alignment: .leading) {
                         Text(n).font(.callout).lineLimit(1)
                         Text(model.draft.localFiles.contains(n) ? "Not sent yet" : "On Polaris")
@@ -135,7 +135,8 @@ struct SmallBanner: View {
         Label(text, systemImage: "wifi.exclamationmark")
             .font(.footnote)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(tint.opacity(0.15))
+            .padding(DS.Space.m)
+            .glassEffect(.regular.tint(tint.opacity(0.2)), in: .rect(cornerRadius: DS.Radius.control))
+            .padding(.horizontal, DS.Space.l)
     }
 }

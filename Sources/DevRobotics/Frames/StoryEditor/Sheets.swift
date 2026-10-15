@@ -89,13 +89,23 @@ struct StoryDetailsSheet: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 Form {
-                    Section("Details") {
+                    Section {
                         TextField("Place (required)", text: model.binding("place"))
                         DateRow(model: model).id("date")
                         GPSRow(model: model)
+                    } header: {
+                        Label("Where and when", systemImage: "mappin.and.ellipse")
+                    } footer: { Text("Shown under the title on the story page.") }
+                    Section {
                         TextField("Summary (one line)", text: model.binding("summary"), axis: .vertical)
                         TextField("Cover alt text", text: model.binding("alt"), axis: .vertical)
+                    } header: {
+                        Label("Description", systemImage: "text.alignleft")
+                    }
+                    Section {
                         SlugRow(model: model)
+                    } header: {
+                        Label("Link", systemImage: "link")
                     }
                     FilesSection(model: model)
                     if model.draft.lastError != nil || !model.draft.problems.isEmpty {
@@ -110,6 +120,8 @@ struct StoryDetailsSheet: View {
                     if focusDate { DispatchQueue.main.async { withAnimation { proxy.scrollTo("date", anchor: .top) } } }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background { AppBackground() }
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
