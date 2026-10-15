@@ -8,5 +8,6 @@ struct RootView: View {
             FramesView().tabItem { Label("Frames", systemImage: "photo.on.rectangle") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        .scrollDismissesKeyboard(.interactively)   // drag a list/form down to hide the keyboard too
     }
 }

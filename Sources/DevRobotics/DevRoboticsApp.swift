@@ -4,7 +4,10 @@ import SwiftUI
 struct DevRoboticsApp: App {
     @State private var settings = SettingsStore()
 
-    init() { Theme.registerFonts() }
+    init() {
+        Theme.registerFonts()
+        KeyboardDone.install()
+    }
 
     var body: some Scene {
         WindowGroup {
