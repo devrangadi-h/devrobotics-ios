@@ -8,7 +8,21 @@ final class SettingsStore {
     var host: String { didSet { UserDefaults.standard.set(host, forKey: "host") } }
     var token: String { didSet { Keychain.set(token, for: "token") } }
 
+    /// Tab opened at launch: "status" | "lights" | "frames" | "settings". Default "lights".
+    var launchTab: String { didSet { UserDefaults.standard.set(launchTab, forKey: "launchTab") } }
+
+    static let launchTabs = ["status", "lights", "frames", "settings"]
+    static var storedLaunchTab: RootView.AppTab {
+        switch UserDefaults.standard.string(forKey: "launchTab") {
+        case "status": return .status
+        case "frames": return .frames
+        case "settings": return .settings
+        default: return .lights
+        }
+    }
+
     init() {
+        launchTab = UserDefaults.standard.string(forKey: "launchTab").flatMap { Self.launchTabs.contains($0) ? $0 : nil } ?? "lights"
         if DemoMode.isOn {   // screenshots only: fake host/token, never persisted (didSet doesn't run in init)
             host = DemoMode.host
             token = "demo"

@@ -10,7 +10,7 @@ struct RootView: View {
         case "lights": return .lights
         case "frames", "story", "photo", "publish", "storyproblems": return .frames
         case "settings": return .settings
-        default: return .status
+        default: return SettingsStore.storedLaunchTab
         }
     }
 
