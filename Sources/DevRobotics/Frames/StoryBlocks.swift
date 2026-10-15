@@ -6,7 +6,7 @@ import Foundation
 /// verbatim as `.raw` so nothing a user wrote can be lost. The pipeline's Markdown subset: paragraphs, `## ` headings
 /// (### is flattened to ## by the site), `- ` and `1. ` lists, `> ` quotes, **bold**, *italic*, [links](url).
 struct StoryBlock: Identifiable, Equatable {
-    struct Item: Equatable { var name: String; var note: String }
+    struct Item: Equatable { var name: String; var note: String; var alt: String = "" }
     enum Kind: Equatable {
         case paragraph(String)                       // inline markdown kept as text
         case heading(String)                         // text without the "## "
@@ -14,7 +14,7 @@ struct StoryBlock: Identifiable, Equatable {
         case numbered([String])
         case quote(String)
         case image(name: String, note: String, alt: String, place: String, full: Bool)
-        case images(items: [Item], alt: String)      // 2-3 side by side
+        case images(items: [Item])                   // 2-3 side by side; each item has its own note and alt
         case clip(name: String, note: String)
         case youtube(url: String, title: String)
         case raw(String)                             // unrecognised, verbatim (may span lines)
@@ -109,8 +109,8 @@ enum StoryBlocks {
         switch kind {
         case .image(let name, let note, let alt, let place, let full):
             return FrameFormat.imageMarker(name: name, note: note, alt: alt, place: place, full: full)
-        case .images(let items, let alt):
-            return FrameFormat.imagesMarker(items.map { (name: $0.name, note: $0.note) }, alt: alt)
+        case .images(let items):
+            return FrameFormat.imagesMarker(items.map { (name: $0.name, note: $0.note, alt: $0.alt) })
         case .clip(let name, let note):
             return FrameFormat.clipMarker(name: name, note: note)
         case .youtube(let url, let title):
@@ -129,7 +129,7 @@ enum StoryBlocks {
         for b in blocks {
             switch b.kind {
             case .image(let name, _, _, _, _): add(name)
-            case .images(let items, _): items.forEach { add($0.name) }
+            case .images(let items): items.forEach { add($0.name) }
             case .clip(let name, _): add(name)
             case .raw(let s):
                 for l in s.components(separatedBy: "\n") where isMarkerStart(l) { FrameFormat.markerFiles(l).forEach(add) }
@@ -326,23 +326,25 @@ enum StoryBlocks {
                   rest.first == .word(files[0]), alts.first != "", places.first != "" else { return nil }
             return .image(name: files[0], note: quoted.first ?? "", alt: alts.first ?? "", place: places.first ?? "", full: !flags.isEmpty)
         case "images":
-            // The model holds one alt for the whole marker; FrameFormat writes it after the last file, so it must belong to it.
-            guard !words.contains(where: { $0.lowercased() == "full" }), places.isEmpty,
-                  case .word? = rest.first, alts.count <= 1, alts.first != "" else { return nil }
+            // Each file may be followed by its own note and alt (alt attaches to the file it follows).
+            guard !words.contains(where: { $0.lowercased() == "full" }), places.isEmpty, case .word? = rest.first else { return nil }
             var items: [StoryBlock.Item] = []
+            var hasAlt: [Bool] = []
             for t in rest {
                 switch t {
-                case .word(let v): items.append(StoryBlock.Item(name: v, note: ""))
+                case .word(let v): items.append(StoryBlock.Item(name: v, note: "")); hasAlt.append(false)
                 case .quoted(let v):
                     if !items[items.count - 1].note.isEmpty { return nil }
                     items[items.count - 1].note = v
-                case .alt:
-                    if items.count < words.count { return nil }   // alt before the last file belongs to an earlier item
+                case .alt(let v):
+                    if v.isEmpty || hasAlt[items.count - 1] { return nil }
+                    items[items.count - 1].alt = v
+                    hasAlt[items.count - 1] = true
                 case .place: return nil
                 }
             }
             guard (2...3).contains(items.count) else { return nil }
-            return .images(items: items, alt: alts.first ?? "")
+            return .images(items: items)
         case "clip":
             guard alts.isEmpty, places.isEmpty, words.count == 1, quoted.count <= 1 else { return nil }
             return .clip(name: words[0], note: quoted.first ?? "")

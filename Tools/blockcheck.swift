@@ -42,7 +42,7 @@ struct BlockCheck {
         case .numbered(let l): return "numbered(\(l.count))"
         case .quote: return "quote"
         case .image(_, _, _, _, let full): return full ? "image-full" : "image"
-        case .images(let i, _): return "images(\(i.count))"
+        case .images(let i): return "images(\(i.count))"
         case .clip: return "clip"
         case .youtube: return "youtube"
         case .raw: return "RAW"
