@@ -55,7 +55,17 @@ struct FramesView: View {
                 }
             }
             .refreshable { model.summary = nil; await model.refresh(settings) }
-            .task { await model.refresh(settings) }
+            .task {
+                await model.refresh(settings)
+                if DemoMode.isOn, path.isEmpty {   // screenshots only (-demo -screen story|photo|publish)
+                    switch DemoMode.screen {
+                    case "story": path.append(EditTarget(kind: .story, slug: "pumpkintime", draft: nil))
+                    case "photo": path.append(EditTarget(kind: .photo, slug: "rainersky", draft: nil))
+                    case "publish": showPublish = true
+                    default: break
+                    }
+                }
+            }
             .safeAreaInset(edge: .bottom) { sendBar }
             .sheet(isPresented: $showPublish, onDismiss: { model.summary = nil; Task { await model.refresh(settings) } }) {
                 PublishView()

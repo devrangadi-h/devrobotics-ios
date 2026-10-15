@@ -52,6 +52,7 @@ final class DemoURLProtocol: URLProtocol {
             return json(["usedBytes": 61_000_000, "capBytes": 2_147_483_648, "draftCount": 0,
                          "parts": ["drafts": 0, "blobs": 0, "thumbs": 700_000, "previewSite": 60_300_000]])
         case "/v1/frames/entries": return json(["entries": entries])
+        case "/v1/frames/preview", "/v1/frames/publish", "/v1/frames/draft-preview": return json(job(), status: 202)
         case "/api/lights/ping": return json(["ok": true])
         default: break
         }
@@ -61,12 +62,25 @@ final class DemoURLProtocol: URLProtocol {
             else { e["body"] = (e["fields"] as? [String: String])?["note"] ?? "A quiet moment worth keeping." }
             return json(e)
         }
+        if parts.count == 3, parts[1] == "jobs" { return json(job()) }
         if parts.count == 6, parts[4] == "thumb" { return (200, "image/jpeg", thumb(seed: parts[3] + parts[5])) }
         if method == "DELETE" || method == "PUT" { return json(["ok": true, "valid": true, "problems": []]) }
         return json(["error": "demo: not found"], status: 404)
     }
 
     // MARK: fixtures (fake)
+
+    /// An already-finished job (preview/publish/draft-preview) with a plausible change list.
+    private static func job() -> [String: Any] {
+        ["id": "demo-job", "kind": "preview", "state": "done", "started": Int(Date().timeIntervalSince1970) - 6,
+         "finished": Int(Date().timeIntervalSince1970),
+         "log": ["$ frames.py build", "built 4 photo(s), 1 story(ies): 2 processed, 9 unchanged"],
+         "result": ["changes": [["change": "changed", "kind": "story", "slug": "pumpkintime"],
+                                ["change": "new", "kind": "photo", "slug": "mountainfog"],
+                                ["change": "removed", "kind": "photo", "slug": "oldtest"]],
+                    "builtAt": Int(Date().timeIntervalSince1970), "pushed": true,
+                    "url": "/frames/pumpkintime.html", "bodyStartLine": 9, "issues": []]]
+    }
 
     private static func status() -> [String: Any] {
         let now = Date()
