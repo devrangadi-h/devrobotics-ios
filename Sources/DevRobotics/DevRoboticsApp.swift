@@ -4,6 +4,8 @@ import SwiftUI
 struct DevRoboticsApp: App {
     @State private var settings = SettingsStore()
 
+    init() { Theme.registerFonts() }
+
     var body: some Scene {
         WindowGroup {
             RootView()
