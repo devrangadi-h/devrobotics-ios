@@ -6,7 +6,11 @@
 # else read from the Pi with `ssh polaris 'cat ~/.config/polaris/lights_token'`. It is never printed.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO="$(cd "$HERE/../.." && pwd)"
+SRC="$(cd "$HERE/../.." && pwd)"
+# macOS (TCC) stops background LaunchAgents from reading ~/Documents, ~/Desktop and ~/Downloads, so the agents run from
+# their own clone of the same GitHub repo in a folder they can read. The clone is kept on origin/main automatically.
+REPO="${DEVROBOTICS_RUNTIME_DIR:-$HOME/.local/share/devrobotics/repo}"
+HERE="$REPO/Tools/mac"
 AGENTS="${DEVROBOTICS_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 CONF="$HOME/.config/devrobotics"
 TOKEN_FILE="$CONF/installer_token"
@@ -26,6 +30,7 @@ plist() {  # label, script
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
   <key>EnvironmentVariables</key><dict>
+    <key>DEVROBOTICS_AUTOUPDATE</key><string>1</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StandardOutPath</key><string>$LOGS/$1.out.log</string>
@@ -36,6 +41,7 @@ PL
 
 if [ "$PRINT" = 1 ]; then
   echo "[print-only] nothing will be written, loaded or contacted."
+  echo "would clone/update $(git -C "$SRC" remote get-url origin 2>/dev/null) -> $REPO (the agents run from this clone, not from ~/Documents)"
   echo "would create: $LOGS, $CONF (700)"
   if [ -s "$TOKEN_FILE" ]; then echo "token: keeping existing $TOKEN_FILE"
   elif [ -n "$DEVROBOTICS_INSTALLER_TOKEN" ]; then echo "token: would write from \$DEVROBOTICS_INSTALLER_TOKEN to $TOKEN_FILE (600)"
@@ -48,7 +54,14 @@ if [ "$PRINT" = 1 ]; then
   exit 0
 fi
 
-mkdir -p "$LOGS" "$AGENTS"; chmod +x "$HERE/devrobotics-watcher" "$HERE/devrobotics-helper"
+ORIGIN="$(git -C "$SRC" remote get-url origin)"
+if [ -d "$REPO/.git" ]; then
+  git -C "$REPO" fetch --quiet origin main && git -C "$REPO" merge --ff-only --quiet origin/main
+else
+  mkdir -p "$(dirname "$REPO")"; git clone --quiet "$ORIGIN" "$REPO"
+fi
+echo "Runtime clone: $REPO ($(git -C "$REPO" rev-parse --short HEAD))"
+mkdir -p "$LOGS" "$AGENTS"; chmod +x "$HERE/devrobotics-watcher" "$HERE/devrobotics-helper" "$REPO/Tools/install.sh"
 mkdir -p "$CONF"; chmod 700 "$CONF"
 if [ ! -s "$TOKEN_FILE" ]; then
   T="${DEVROBOTICS_INSTALLER_TOKEN:-}"

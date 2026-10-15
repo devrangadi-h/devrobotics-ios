@@ -8,6 +8,10 @@
 # Env: DEVROBOTICS_XTOOL (override the xtool binary, for tests), DEVROBOTICS_SUPPORT_DIR.
 set -e
 cd "$(dirname "$0")/.."
+# Background agents (Tools/mac) set this so the runtime clone always builds the latest origin/main.
+if [ "${DEVROBOTICS_AUTOUPDATE:-0}" = "1" ]; then
+  git fetch --quiet origin main && git merge --ff-only --quiet origin/main || echo "warning: could not update to origin/main" >&2
+fi
 DRY=0; STAMP_ONLY=0; ARGS=()
 for a in "$@"; do
   case "$a" in
