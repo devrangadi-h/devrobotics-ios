@@ -5,6 +5,18 @@ struct PhotoEditorView: View {
     @Bindable var model: DraftEditorModel
     @State private var item: PhotosPickerItem?
     @State private var pickedCount = 0
+    @State private var showProblems = false
+    @State private var showDate = false
+
+    private func fix(_ f: FrameProblem.Fix) {
+        switch f {
+        case .setDate:
+            showProblems = false
+            Task { try? await Task.sleep(for: .milliseconds(350)); showDate = true }
+        case .openDetails: showProblems = false      // Details fields are on this screen
+        default: break
+        }
+    }
 
     var body: some View {
         Form {
@@ -41,31 +53,36 @@ struct PhotoEditorView: View {
             }
             Section("Options") {
                 GPSRow(model: model)
-                DateRow(model: model)
+                DateSourceRow(model: model, showSheet: $showDate)
             }
             Section("Note") {
                 TextEditor(text: model.bodyBinding)
                     .frame(minHeight: 120)
                     .autocorrectionDisabled(false)
             }
-            let problems = model.draft.lastError != nil || !model.draft.problems.isEmpty
-            if problems { Section("Problems") { ProblemsView(draft: model.draft) } }
-            Section("Before sending") {
-                let v = model.draft.validation
-                if v.isEmpty && !model.draft.dirty {
-                    // Opened from the Pi and not edited yet: nothing is queued for sending.
+            if !model.draft.dirty && model.problems().isEmpty {
+                // Opened from the Pi and not edited yet: nothing is queued for sending.
+                Section {
                     Label("No changes to send", systemImage: "equal.circle").foregroundStyle(.secondary)
-                } else if v.isEmpty {
-                    Label("Ready to send", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.ok)
-                        .symbolEffect(.bounce, value: v.isEmpty)
-                } else {
-                    ForEach(v, id: \.self) { Label($0, systemImage: "circle.dashed").font(.callout).foregroundStyle(Theme.warn) }
                 }
             }
         }
         .dsPage()
         .dsAnimation(value: model.draft.thumbName)
-        .dsAnimation(.dsSnappy, value: model.draft.validation)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            let problems = model.problems()
+            if !problems.isEmpty {
+                ProblemsPill(problems: problems) { showProblems = true }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, DS.Space.xs)
+            }
+        }
+        .sheet(isPresented: $showProblems) {
+            ProblemsSheet(problems: model.problems(), onFix: { _, f in fix(f) }, onSelect: { _ in })
+        }
+        .sheet(isPresented: $showDate) {
+            SetDateSheet(initial: model.dateSheetInitial) { model.setDate($0) }
+        }
         .sensoryFeedback(.success, trigger: pickedCount)
         .onChange(of: item) { _, new in
             guard let new else { return }

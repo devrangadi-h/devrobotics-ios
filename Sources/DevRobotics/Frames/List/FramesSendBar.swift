@@ -8,6 +8,9 @@ struct FramesSendBar: View {
 
     var body: some View {
         let pending = model.pendingDrafts
+        let sendable = model.sendableDrafts
+        let blocked = model.blockedErrorCount
+        let nothingToSend = sendable.isEmpty
         VStack(spacing: DS.Space.s) {
             if model.sending {
                 VStack(spacing: DS.Space.s) {
@@ -32,9 +35,10 @@ struct FramesSendBar: View {
                     Image(systemName: model.sending ? "arrow.triangle.2.circlepath" : "arrow.up.circle.fill")
                         .symbolEffect(.pulse, isActive: model.sending)
                         .contentTransition(.symbolEffect(.replace))
-                    Text(model.sending ? "Sending…" : "Send to Polaris")
-                    if !model.sending {
-                        Text("\(pending.count)")
+                    Text(model.sending ? "Sending…"
+                         : nothingToSend ? "Fix \(blocked) \(blocked == 1 ? "error" : "errors") first" : "Send to Polaris")
+                    if !model.sending && !nothingToSend {
+                        Text("\(sendable.count)")
                             .font(Theme.font(13, weight: .bold, mono: true, relativeTo: .footnote))
                             .contentTransition(.numericText())
                             .padding(.horizontal, 8).padding(.vertical, 2)
@@ -43,8 +47,12 @@ struct FramesSendBar: View {
                 }
             }
             .buttonStyle(.primaryAction)
-            .disabled(model.sending || !connected)
+            .disabled(model.sending || !connected || nothingToSend)
             .opacity(connected ? 1 : 0.6)
+            if !model.sending, !nothingToSend, blocked > 0 {
+                Text("\(pending.count - sendable.count) \(pending.count - sendable.count == 1 ? "draft has" : "drafts have") errors and will be skipped.")
+                    .font(Theme.font(11, relativeTo: .caption2)).foregroundStyle(.secondary)
+            }
             if !connected {
                 Text("Connect to Polaris in Settings to send.")
                     .font(Theme.font(11, relativeTo: .caption2)).foregroundStyle(.secondary)
@@ -54,5 +62,6 @@ struct FramesSendBar: View {
         .glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card))
         .dsAnimation(value: model.sending)
         .dsAnimation(value: pending.count)
+        .dsAnimation(value: blocked)
     }
 }

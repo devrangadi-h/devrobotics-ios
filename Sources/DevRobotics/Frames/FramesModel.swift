@@ -62,6 +62,16 @@ final class FramesModel {
 
     var pendingDrafts: [FrameDraft] { store.drafts.filter { $0.dirty } }
 
+    /// Errors (never warnings) that block sending this draft. Instant, offline.
+    func blockingErrors(for d: FrameDraft) -> [FrameProblem] {
+        FrameProblemEngine.local(draft: d, blocks: d.kind == .story ? StoryBlocks.parse(d.body) : [],
+                                 localFileURL: { n in d.localFiles.contains(n) ? self.store.mediaURL(d.id, n) : nil }).errors
+    }
+    /// Pending drafts that have no errors: these are what Send all uploads.
+    var sendableDrafts: [FrameDraft] { pendingDrafts.filter { blockingErrors(for: $0).isEmpty } }
+    /// Total errors across pending drafts that are skipped.
+    var blockedErrorCount: Int { pendingDrafts.reduce(0) { $0 + blockingErrors(for: $1).count } }
+
     func thumbSource(for d: FrameDraft?, remote: RemoteEntry?, kind: FrameKind, slug: String) -> ThumbSource? {
         if let d, let n = d.thumbName {
             if d.localFiles.contains(n) { return .local(store.mediaURL(d.id, n)) }
@@ -132,7 +142,7 @@ final class FramesModel {
         summary = nil
         defer { sending = false }
         var okCount = 0, failCount = 0
-        for draft in pendingDrafts {
+        for draft in sendableDrafts {
             if await send(draft, settings) { okCount += 1 } else { failCount += 1 }
         }
         summary = failCount == 0 ? "Sent \(okCount) draft\(okCount == 1 ? "" : "s") to Polaris."
