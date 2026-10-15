@@ -18,10 +18,12 @@ Built with SwiftUI and SwiftPM, and built/installed with [xtool](https://github.
 ```sh
 brew install xtool-org/tap/xtool
 xtool setup          # one-time Apple login
-xtool dev            # build, sign, install on a connected iPhone
+Tools/install.sh     # stamp build info, then build, sign, install on a connected iPhone (wraps `xtool dev`)
 ```
 
-Free Apple IDs expire after 7 days; re-run `xtool dev` to reinstall.
+Always install through `Tools/install.sh` so About shows the build id and date (`--stamp-only` just writes
+`BuildStamp.json`; other args go to `xtool dev`). Free Apple IDs expire after 7 days; re-run it to reinstall.
+About shows the countdown and schedules a reminder the day before.
 
 ## Fonts
 
