@@ -29,6 +29,8 @@ struct PickedMedia {
     var url: URL
     var name: String
     var isVideo: Bool
+    /// Longer than the 10 s limit: the caller must run it through the trimmer before use.
+    var needsTrim = false
 }
 
 struct MediaError: LocalizedError {
@@ -58,19 +60,27 @@ enum MediaPicking {
             try? FileManager.default.removeItem(at: file.url)
             throw MediaError(message: "Unsupported \(isVideo ? "video" : "photo") format \"\(ext.isEmpty ? "unknown" : ext)\". Use \(isVideo ? "MP4/MOV" : "JPEG or HEIC").")
         }
+        var needsTrim = false
         if isVideo {
-            let asset = AVURLAsset(url: file.url)
-            let secs = (try? await asset.load(.duration).seconds) ?? 0
-            if secs > maxClipSeconds + 0.05 {
-                try? FileManager.default.removeItem(at: file.url)
-                throw MediaError(message: String(format: "That clip is %.0f s; clips must be 10 s or shorter. Trim it in Photos first.", secs))
-            }
+            let secs = await duration(of: file.url)
+            needsTrim = secs > maxClipSeconds + 0.05
         }
         let stamp = DateFormatter()
         stamp.locale = Locale(identifier: "en_US_POSIX")
         stamp.dateFormat = "yyyyMMdd_HHmmss"
         let name = "IMG_\(stamp.string(from: Date()))_\(Int.random(in: 100...999)).\(ext)"
         // Keep the file extension intact for the later import step.
-        return PickedMedia(url: file.url, name: name, isVideo: isVideo)
+        return PickedMedia(url: file.url, name: name, isVideo: isVideo, needsTrim: needsTrim)
+    }
+
+    static func duration(of url: URL) async -> Double {
+        (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
+    }
+
+    /// Name for a trimmed file: same base name, the extension of the file the trimmer produced.
+    static func renamed(_ name: String, forFileAt url: URL) -> String {
+        let base = (name as NSString).deletingPathExtension
+        let ext = url.pathExtension.lowercased()
+        return ext.isEmpty ? name : "\(base).\(ext)"
     }
 }

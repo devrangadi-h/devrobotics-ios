@@ -79,6 +79,12 @@ private struct PendingInsert: Identifiable {
     var names: [String]
 }
 
+struct TrimRequest: Identifiable {
+    let id = UUID()
+    let url: URL
+    let finish: (URL?) -> Void
+}
+
 struct StoryBodyEditor: View {
     @Bindable var model: DraftEditorModel
     @State private var controller = MarkdownController()
@@ -87,6 +93,7 @@ struct StoryBodyEditor: View {
     @State private var clipItem: [PhotosPickerItem] = []
     @State private var pending: PendingInsert?
     @State private var showYouTube = false
+    @State private var trimRequest: TrimRequest?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,6 +109,20 @@ struct StoryBodyEditor: View {
         }
         .sheet(isPresented: $showYouTube) {
             YouTubeSheet { url, title in insert(FrameFormat.youtubeMarker(url: url, title: title)) }
+        }
+        .fullScreenCover(item: $trimRequest) { req in
+            VideoTrimmer(url: req.url) { out in
+                trimRequest = nil
+                req.finish(out)
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    /// Present the system trimmer and wait for it. nil = cancelled or failed.
+    private func trim(_ url: URL) async -> URL? {
+        await withCheckedContinuation { cont in
+            trimRequest = TrimRequest(url: url) { cont.resume(returning: $0) }
         }
     }
 
@@ -152,7 +173,23 @@ struct StoryBodyEditor: View {
             var names: [String] = []
             for it in items {
                 do {
-                    let media = try await MediaPicking.load(it)
+                    var media = try await MediaPicking.load(it)
+                    if media.needsTrim, kind == .clip {
+                        let original = media.url
+                        guard let trimmed = await trim(original) else {
+                            try? FileManager.default.removeItem(at: original)
+                            model.error = "Trim cancelled, so the clip wasn't added."
+                            continue
+                        }
+                        try? FileManager.default.removeItem(at: original)
+                        let secs = await MediaPicking.duration(of: trimmed)
+                        guard secs <= MediaPicking.maxClipSeconds + 0.05 else {
+                            try? FileManager.default.removeItem(at: trimmed)
+                            model.error = String(format: "The trimmed clip is still %.0f s; clips must be 10 s or shorter.", secs)
+                            continue
+                        }
+                        media = PickedMedia(url: trimmed, name: MediaPicking.renamed(media.name, forFileAt: trimmed), isVideo: true)
+                    }
                     if media.isVideo != (kind == .clip) {
                         try? FileManager.default.removeItem(at: media.url)
                         model.error = kind == .clip ? "Pick a video for a clip." : "Pick photos, not videos."
