@@ -22,7 +22,7 @@ import time
 import uuid
 from pathlib import Path
 
-from flask import Flask, Response, abort, jsonify, request, send_from_directory
+from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
 HOME = Path.home()
 TOKEN_PATH = Path(os.environ.get("POLARIS_TOKEN_PATH", HOME / ".config/polaris/lights_token"))
@@ -513,6 +513,124 @@ def thumb(kind, slug, name):
         if THUMB_CREATED % 25 == 0:
             trim_dir_lru(THUMBS, THUMBS_CAP)
     return send_from_directory(THUMBS, dst.name, mimetype="image/jpeg", max_age=86400)
+
+
+# ---------- frames: clip info + streamed preview ----------
+
+CLIP_WAIT = float(os.environ.get("APP_CLIP_WAIT_SECONDS", "20"))   # how long a request waits for a transcode
+CLIP_TIMEOUT = int(os.environ.get("APP_CLIP_TIMEOUT_SECONDS", "600"))
+CLIP_MAX_SOURCE = int(os.environ.get("APP_CLIP_MAX_SOURCE_BYTES", str(1024 ** 3)))
+_clip_gen = threading.Semaphore(1)       # one ffmpeg preview at a time
+_clip_state_lock = threading.Lock()
+_clip_inflight = {}                      # cache key -> threading.Event
+_clip_failed = {}                        # cache key -> error text
+_clipinfo_cache = {}                     # (path, mtime_ns, size) -> dict
+
+
+def _clip_source(kind, slug, name):
+    folder = entry_dir(kind, slug)
+    try:
+        name = safe_name(name)
+    except ValueError:
+        abort(400)
+    src = folder / name
+    if src.suffix.lower() not in CLIP_EXT:
+        abort(400)
+    if not src.is_file():
+        abort(404)
+    return src
+
+
+@app.get("/v1/frames/<kind>/<slug>/clipinfo/<name>")
+def clipinfo(kind, slug, name):
+    src = _clip_source(kind, slug, name)
+    st = src.stat()
+    key = (str(src), st.st_mtime_ns, st.st_size)
+    info = _clipinfo_cache.get(key)
+    if info is None:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=width,height:stream_tags=rotate:stream_side_data=rotation:format=duration",
+             "-of", "json", str(src)], capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return err("probe failed", 500, detail=r.stderr[-300:])
+        try:
+            j = json.loads(r.stdout)
+            stream = (j.get("streams") or [{}])[0]
+            w, h = int(stream.get("width", 0)), int(stream.get("height", 0))
+            rot = 0
+            for sd in stream.get("side_data_list", []) or []:
+                if "rotation" in sd:
+                    rot = int(float(sd["rotation"]))
+            rot = rot or int(stream.get("tags", {}).get("rotate", 0) or 0)
+            if abs(rot) % 180 == 90:
+                w, h = h, w
+            dur = float(j.get("format", {}).get("duration", 0) or 0)
+        except (ValueError, KeyError, IndexError):
+            return err("probe failed", 500)
+        info = {"durationSeconds": round(dur, 2), "width": w, "height": h, "sizeBytes": st.st_size}
+        if len(_clipinfo_cache) > 512:
+            _clipinfo_cache.clear()
+        _clipinfo_cache[key] = info
+    return jsonify(info)
+
+
+def _transcode_clip(key, src: Path, dst: Path):
+    tmp = THUMBS / f"{key}.tmp.mp4"
+    try:
+        with _clip_gen:
+            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an",
+                   "-vf", "scale='if(gt(iw,ih),min(720,iw),-2)':'if(gt(iw,ih),-2,min(720,ih))',format=yuv420p",
+                   "-c:v", "libx264", "-preset", "veryfast", "-b:v", "1500k", "-maxrate", "2M", "-bufsize", "3M",
+                   "-movflags", "+faststart", "-f", "mp4", str(tmp)]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=CLIP_TIMEOUT)
+        if r.returncode != 0 or not tmp.exists():
+            _clip_failed[key] = r.stderr[-300:] or "ffmpeg failed"
+        else:
+            tmp.replace(dst)
+    except Exception as e:  # timeout etc.
+        _clip_failed[key] = str(e)[:300]
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        with _clip_state_lock:
+            ev = _clip_inflight.pop(key, None)
+        if ev:
+            ev.set()
+
+
+@app.get("/v1/frames/<kind>/<slug>/clip/<name>")
+def clip(kind, slug, name):
+    src = _clip_source(kind, slug, name)
+    st = src.stat()
+    if st.st_size > CLIP_MAX_SOURCE:
+        return err("clip too large for preview", 413)
+    key = hashlib.sha1(f"clip|{src}|{st.st_mtime_ns}|{st.st_size}".encode()).hexdigest()
+    dst = THUMBS / f"{key}.mp4"
+    if not dst.exists():
+        with _clip_state_lock:
+            ev = _clip_inflight.get(key)
+            if ev is None and not dst.exists():
+                _clip_failed.pop(key, None)
+                ev = threading.Event()
+                _clip_inflight[key] = ev
+                threading.Thread(target=_transcode_clip, args=(key, src, dst), daemon=True).start()
+        if ev is not None:
+            ev.wait(CLIP_WAIT)
+        if not dst.exists():
+            if key in _clip_failed:
+                return err("preview failed", 500, detail=_clip_failed[key])
+            resp = jsonify({"status": "preparing", "retryAfter": 5})
+            resp.status_code = 202
+            resp.headers["Retry-After"] = "5"
+            return resp
+    try:
+        os.utime(dst)  # LRU
+    except OSError:
+        pass
+    return send_file(dst, mimetype="video/mp4", conditional=True, max_age=3600)
 
 
 # ---------- frames: preview + publish ----------
