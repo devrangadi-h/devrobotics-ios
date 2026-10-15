@@ -42,6 +42,7 @@ struct StatusView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Space.l) {
                     if let s = model.status {
@@ -73,6 +74,13 @@ struct StatusView: View {
                 if has { appeared = true }
             }
             .onAppear { if model.status != nil { appeared = true } }
+            .task(id: model.status != nil) {
+                // Screenshot hook (demo only): `-demo -scroll` brings the Fan card into view.
+                guard DemoMode.isOn, ProcessInfo.processInfo.arguments.contains("-scroll"), model.status != nil else { return }
+                try? await Task.sleep(for: .seconds(2.5))
+                proxy.scrollTo("fan", anchor: .bottom)
+            }
+            }
         }
     }
 
@@ -98,6 +106,10 @@ struct StatusView: View {
         chart(s).modifier(stagger(2))
 
         metrics(s).modifier(stagger(3))
+
+        if !model.isCached {
+            FanCard().id("fan").modifier(stagger(3))
+        }
 
         if let services = s.services, !services.isEmpty {
             servicesCard(services).modifier(stagger(4))
