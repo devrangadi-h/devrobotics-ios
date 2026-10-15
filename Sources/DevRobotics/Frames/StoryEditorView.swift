@@ -1,121 +1,348 @@
 import SwiftUI
 import PhotosUI
 
-struct StoryEditorView: View {
-    @Bindable var model: DraftEditorModel
-    enum Tab: String, CaseIterable { case details = "Details", body = "Body", preview = "Preview" }
-    @State private var tab: Tab = .details
-    @State private var coverItem: PhotosPickerItem?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 8)
-            switch tab {
-            case .details: details
-            case .body: StoryBodyEditor(model: model)
-            case .preview: StoryPreview(model: model)
-            }
-        }
-        .alert("Problem", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(model.error ?? "") }
-    }
-
-    private var details: some View {
-        Form {
-            Section("Cover") {
-                let cover = model.draft.field("cover")
-                if !cover.isEmpty, model.draft.allFiles.contains(cover) {
-                    FrameThumb(source: model.source(for: cover)).frame(height: 180).clipShape(RoundedRectangle(cornerRadius: 8))
-                    Text(cover).font(.caption).foregroundStyle(.secondary)
-                }
-                PhotosPicker(selection: $coverItem, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
-                    Label(cover.isEmpty ? "Choose cover photo" : "Replace cover photo", systemImage: "photo.badge.plus")
-                }
-                if model.busy { ProgressView("Reading original…") }
-            }
-            Section("Details") {
-                TextField("Title (required)", text: model.binding("title", suggestsSlug: true))
-                TextField("Place (required)", text: model.binding("place"))
-                SlugRow(model: model)
-                GPSRow(model: model)
-                TextField("Summary (one line)", text: model.binding("summary"), axis: .vertical)
-                TextField("Cover alt text", text: model.binding("alt"), axis: .vertical)
-                DateRow(model: model)
-            }
-            FilesSection(model: model)
-            if model.draft.lastError != nil || !model.draft.problems.isEmpty {
-                Section("Problems") { ProblemsView(draft: model.draft) }
-            }
-            let v = model.draft.validation
-            if !v.isEmpty {
-                Section("Before sending") { ForEach(v, id: \.self) { Label($0, systemImage: "info.circle").font(.callout) } }
-            }
-        }
-        .onChange(of: coverItem) { _, new in
-            guard let new else { return }
-            Task {
-                model.busy = true
-                defer { model.busy = false; coverItem = nil }
-                do {
-                    let media = try await MediaPicking.load(new)
-                    if media.isVideo { try? FileManager.default.removeItem(at: media.url); model.error = "The cover must be a photo."; return }
-                    if let n = model.add(media) { model.draft.fields["cover"] = n }
-                } catch { model.error = error.localizedDescription }
-            }
-        }
-    }
-}
-
-// MARK: body + toolbar
-
-private struct PendingInsert: Identifiable {
-    enum Kind { case image, images, clip }
-    let id = UUID()
-    var kind: Kind
-    var names: [String]
-}
-
 struct TrimRequest: Identifiable {
     let id = UUID()
     let url: URL
     let finish: (URL?) -> Void
 }
 
-struct StoryBodyEditor: View {
+/// The story editor: one scrolling document (cover, title, blocks) with Write / Preview modes.
+/// Pieces live in `StoryEditor/`.
+struct StoryEditorView: View {
     @Bindable var model: DraftEditorModel
-    @State private var controller = MarkdownController()
-    @State private var imageItem: [PhotosPickerItem] = []
+    enum Mode: String, CaseIterable { case write = "Write", preview = "Preview" }
+
+    @State private var doc: StoryDocument
+    @State private var bridge: StoryPreviewBridge?
+    @State private var mode: Mode = .write
+
+    @State private var insertIndex = 0
+    @State private var showImagePicker = false
+    @State private var showImagesPicker = false
+    @State private var showClipPicker = false
+    @State private var showCoverPicker = false
+    @State private var imageItems: [PhotosPickerItem] = []
     @State private var imagesItems: [PhotosPickerItem] = []
-    @State private var clipItem: [PhotosPickerItem] = []
-    @State private var pending: PendingInsert?
+    @State private var clipItems: [PhotosPickerItem] = []
+    @State private var coverItem: [PhotosPickerItem] = []
     @State private var showYouTube = false
+    @State private var editingID: UUID?
+    @State private var showDetails = false
+    @State private var detailsFocusDate = false
+    @State private var showFullScreen = false
+    @State private var deleteTarget: UUID?
     @State private var trimRequest: TrimRequest?
 
+    init(model: DraftEditorModel) {
+        self.model = model
+        _doc = State(initialValue: StoryDocument(body: model.draft.body))
+    }
+
     var body: some View {
+        dialogs(sheets(pickers(changes(lifecycle(content)))))
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
-            toolbar
-            Divider()
-            MarkdownTextView(text: model.bodyBinding, controller: controller)
+            Picker("Mode", selection: $mode) {
+                Text("Write").tag(Mode.write)
+                Text("Preview").tag(Mode.preview)
+            }
+            .pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 8)
+            if mode == .write { writeView } else { previewView }
         }
-        .onChange(of: imageItem) { _, v in handle(v, .image) { imageItem = [] } }
+    }
+
+    private func lifecycle<V: View>(_ v: V) -> some View {
+        v
+        .toolbar { editorToolbar }
+        .onAppear { setUp() }
+        .onChange(of: model.draft.body) { _, new in doc.reload(from: new) }
+    }
+
+    private func changes<V: View>(_ v: V) -> some View {
+        v
+        .onChange(of: model.draft.fields) { _, _ in bridge?.markChanged() }
+        .onChange(of: model.draft.allFiles) { _, _ in bridge?.markChanged() }
+        .onChange(of: mode) { _, m in modeChanged(m) }
+        .onChange(of: imageItems) { _, v in handle(v, .image) { imageItems = [] } }
         .onChange(of: imagesItems) { _, v in handle(v, .images) { imagesItems = [] } }
-        .onChange(of: clipItem) { _, v in handle(v, .clip) { clipItem = [] } }
-        .sheet(item: $pending) { p in
-            InsertDetailsSheet(pending: p) { block in insert(block) }
+        .onChange(of: clipItems) { _, v in handle(v, .clip) { clipItems = [] } }
+        .onChange(of: coverItem) { _, v in handleCover(v) }
+    }
+
+    @ToolbarContentBuilder private var editorToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { showFullScreen = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                .accessibilityLabel("Full-screen writing")
         }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { detailsFocusDate = false; showDetails = true } label: { Image(systemName: "info.circle") }
+                .accessibilityLabel("Details")
+        }
+    }
+
+    private func setUp() {
+        doc.onBody = { [weak model] md in
+            model?.draft.body = md
+            bridge?.markChanged()
+        }
+        if bridge == nil { bridge = StoryPreviewBridges.make(for: model) }
+    }
+
+    private func modeChanged(_ m: Mode) {
+        if m == .preview, let b = bridge, b.isStale { b.refresh() }
+    }
+
+    private func pickers<V: View>(_ v: V) -> some View {
+        v
+        .photosPicker(isPresented: $showImagePicker, selection: $imageItems, maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
+        .photosPicker(isPresented: $showImagesPicker, selection: $imagesItems, maxSelectionCount: 3, matching: .images, preferredItemEncoding: .current)
+        .photosPicker(isPresented: $showClipPicker, selection: $clipItems, maxSelectionCount: 1, matching: .videos, preferredItemEncoding: .current)
+        .photosPicker(isPresented: $showCoverPicker, selection: $coverItem, maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current)
+    }
+
+    private func sheets<V: View>(_ v: V) -> some View {
+        v
         .sheet(isPresented: $showYouTube) {
-            YouTubeSheet { url, title in insert(FrameFormat.youtubeMarker(url: url, title: title)) }
+            YouTubeSheet { url, title in
+                var b = EditorBlock(media: .youtube)
+                b.url = url; b.title = title
+                doc.insert(b, at: insertIndex)
+            }
         }
+        .sheet(isPresented: Binding(get: { editingID != nil && doc.index(of: editingID!) != nil },
+                                    set: { if !$0 { editingID = nil } })) {
+            if let id = editingID { BlockDetailsSheet(block: doc.block(id), model: model) }
+        }
+        .sheet(isPresented: $showDetails) { StoryDetailsSheet(model: model, focusDate: detailsFocusDate) }
+        .fullScreenCover(isPresented: $showFullScreen) { FullScreenWriter(doc: doc) }
         .fullScreenCover(item: $trimRequest) { req in
             VideoTrimmer(url: req.url) { out in
                 trimRequest = nil
                 req.finish(out)
             }
             .ignoresSafeArea()
+        }
+    }
+
+    private func dialogs<V: View>(_ v: V) -> some View {
+        v
+        .confirmationDialog("Delete this block?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }),
+                            titleVisibility: .visible) {
+            if let id = deleteTarget, let b = doc.blocks.first(where: { $0.id == id }) {
+                let exclusive = exclusiveFiles(b)
+                Button("Delete block", role: .destructive) { doc.remove(id) }
+                if !exclusive.isEmpty {
+                    Button("Delete block and remove \(exclusive.count == 1 ? "file" : "\(exclusive.count) files")", role: .destructive) {
+                        doc.remove(id)
+                        exclusive.forEach { model.remove($0) }
+                    }
+                }
+            }
+        } message: {
+            Text("The file stays in the story's files unless you remove it too.")
+        }
+        .alert("Problem", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(model.error ?? "") }
+    }
+
+    // MARK: write
+
+    private var issueMap: (byBlock: [UUID: [EditorIssue]], unmapped: [EditorIssue]) {
+        guard let issues = bridge?.issues, !issues.isEmpty else { return ([:], []) }
+        let ranges = EditorBlocks.lineRanges(doc.blocks)
+        var map: [UUID: [EditorIssue]] = [:]
+        var rest: [EditorIssue] = []
+        for i in issues {
+            var target: UUID?
+            if i.kind == .missingFile, let n = i.name {
+                target = doc.blocks.first { $0.fileNames.contains { $0.caseInsensitiveCompare(n) == .orderedSame } }?.id
+            }
+            if target == nil { target = ranges.first { $0.lines.contains(i.line) }?.id }
+            if let target { map[target, default: []].append(i) } else { rest.append(i) }
+        }
+        return (map, rest)
+    }
+
+    private var writeView: some View {
+        let issues = issueMap
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    issueBanner(proxy: proxy)
+                    cover
+                    TextField("Title", text: model.binding("title", suggestsSlug: true), axis: .vertical)
+                        .font(.largeTitle.bold())
+                        .textInputAutocapitalization(.sentences)
+                        .padding(.top, 8)
+                    Text(model.draft.field("place").isEmpty ? "Add a place in Details" : model.draft.field("place"))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .onTapGesture { detailsFocusDate = false; showDetails = true }
+                        .padding(.bottom, 8)
+                    ForEach(Array(doc.blocks.enumerated()), id: \.element.id) { idx, b in
+                        addRow(at: idx)
+                        BlockRow(block: b, model: model, doc: doc, issues: issues.byBlock[b.id] ?? [],
+                                 isFirst: idx == 0, isLast: idx == doc.blocks.count - 1,
+                                 onEdit: { editingID = b.id },
+                                 onDelete: { requestDelete(b) },
+                                 onSetDate: { detailsFocusDate = true; showDetails = true })
+                            .id(b.id)
+                    }
+                    addRow(at: doc.blocks.count, prominent: true)
+                    footer
+                }
+                .padding(.horizontal, 16).padding(.bottom, 40)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    @ViewBuilder private var cover: some View {
+        let c = model.draft.field("cover")
+        Button { showCoverPicker = true } label: {
+            if !c.isEmpty, model.draft.allFiles.contains(c) {
+                FrameThumb(source: model.source(for: c)).frame(height: 220).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(alignment: .bottomTrailing) {
+                        Label("Replace", systemImage: "photo.badge.plus").font(.caption.bold())
+                            .padding(8).background(.ultraThinMaterial, in: Capsule()).padding(8)
+                    }
+            } else {
+                RoundedRectangle(cornerRadius: 12).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6]))
+                    .foregroundStyle(.secondary).frame(height: 140)
+                    .overlay { Label("Add cover photo", systemImage: "photo.badge.plus").foregroundStyle(.secondary) }
+            }
+        }
+        .buttonStyle(.plain)
+        if model.busy { ProgressView("Reading original…").font(.footnote) }
+    }
+
+    private func addRow(at index: Int, prominent: Bool = false) -> some View {
+        AddMenu(onPick: { add($0, at: index) }) {
+            if prominent {
+                Label("Add", systemImage: "plus.circle.fill").font(.callout.bold())
+                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 10))
+            } else {
+                HStack(spacing: 8) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                    Image(systemName: "plus.circle").foregroundStyle(.tertiary)
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                }
+                .frame(height: 22).contentShape(Rectangle())
+            }
+        }
+        .padding(.top, prominent ? 12 : 0)
+    }
+
+    private var footer: some View {
+        let w = doc.wordCount
+        let m = EditorBlocks.readMinutes(words: w)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("\(w) words" + (m > 0 ? " · \(m) min read" : ""))
+            Text("Saved on this phone · \(model.draft.updatedAt.formatted(date: .omitted, time: .shortened))")
+        }
+        .font(.caption).foregroundStyle(.secondary).padding(.top, 16)
+    }
+
+    @ViewBuilder private func issueBanner(proxy: ScrollViewProxy) -> some View {
+        if let issues = bridge?.issues, !issues.isEmpty {
+            let hasErr = issues.contains { $0.level == .error }
+            Button {
+                let ranges = EditorBlocks.lineRanges(doc.blocks)
+                let first = issues.sorted { $0.line < $1.line }.first
+                if let first, let t = ranges.first(where: { $0.lines.contains(first.line) })?.id {
+                    withAnimation { proxy.scrollTo(t, anchor: .center) }
+                } else if first?.kind == .noDate {
+                    detailsFocusDate = true; showDetails = true
+                }
+            } label: {
+                Label("\(issues.count) \(issues.count == 1 ? "problem" : "problems")", systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote.bold()).frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                    .foregroundStyle(hasErr ? Color.red : Theme.warn)
+                    .background((hasErr ? Color.red : Theme.warn).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            ForEach(issueMap.unmapped) { IssueBadge(issue: $0) }
+            if issues.contains(where: { $0.kind == .noDate }) {
+                Button("Set a date") { detailsFocusDate = true; showDetails = true }.font(.footnote.bold())
+            }
+        }
+    }
+
+    // MARK: preview
+
+    @ViewBuilder private var previewView: some View {
+        VStack(spacing: 0) {
+            if let b = bridge, !b.issues.isEmpty {
+                Label("\(b.issues.count) \(b.issues.count == 1 ? "problem" : "problems") - fix them in Write",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote.bold()).foregroundStyle(Theme.warn)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                    .background(Theme.warn.opacity(0.12))
+                    .onTapGesture { mode = .write }
+            }
+            if let b = bridge, b.unavailableReason == nil {
+                HStack {
+                    Text(b.isBuilding ? "Building…" : b.isStale ? "Out of date" : "Up to date")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Refresh") { b.refresh() }.font(.footnote.bold()).disabled(b.isBuilding)
+                }
+                .padding(.horizontal).padding(.vertical, 6)
+                b.makePreviewView()
+            } else {
+                SmallBanner(text: bridge?.unavailableReason ?? "Approximate preview. The real page preview isn't available.")
+                StoryPreview(model: model)
+            }
+        }
+    }
+
+    // MARK: actions
+
+    private func add(_ a: AddAction, at index: Int) {
+        insertIndex = index
+        switch a {
+        case .image: showImagePicker = true
+        case .images: showImagesPicker = true
+        case .clip: showClipPicker = true
+        case .youtube: showYouTube = true
+        case .text, .heading, .bullets, .numbered, .quote:
+            let prefix: String
+            switch a {
+            case .heading: prefix = "## "
+            case .bullets: prefix = "- "
+            case .numbered: prefix = "1. "
+            case .quote: prefix = "> "
+            default: prefix = ""
+            }
+            let b = EditorBlock(text: prefix)
+            doc.insert(b, at: index)
+            doc.focusID = b.id
+        }
+    }
+
+    private func exclusiveFiles(_ b: EditorBlock) -> [String] {
+        b.fileNames.filter { !doc.isFileUsed($0, excluding: b.id) && model.draft.allFiles.contains($0) }
+    }
+
+    private func requestDelete(_ b: EditorBlock) {
+        if exclusiveFiles(b).isEmpty { doc.remove(b.id) } else { deleteTarget = b.id }
+    }
+
+    private func handleCover(_ items: [PhotosPickerItem]) {
+        guard let it = items.first else { return }
+        Task {
+            model.busy = true
+            defer { model.busy = false; coverItem = [] }
+            do {
+                let media = try await MediaPicking.load(it)
+                if media.isVideo { try? FileManager.default.removeItem(at: media.url); model.error = "The cover must be a photo."; return }
+                if let n = model.add(media) { model.draft.fields["cover"] = n }
+            } catch { model.error = error.localizedDescription }
         }
     }
 
@@ -126,47 +353,9 @@ struct StoryBodyEditor: View {
         }
     }
 
-    private var toolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                fmt("bold", "Bold") { controller.apply { FrameFormat.wrap($0, $1, prefix: "**", suffix: "**", placeholder: "bold") } }
-                fmt("italic", "Italic") { controller.apply { FrameFormat.wrap($0, $1, prefix: "*", suffix: "*", placeholder: "italic") } }
-                fmt("textformat.size", "Heading") { controller.apply { FrameFormat.linePrefix($0, $1, prefix: "## ") } }
-                fmt("list.bullet", "Bullet list") { controller.apply { FrameFormat.linePrefix($0, $1, prefix: "- ") } }
-                fmt("text.quote", "Quote") { controller.apply { FrameFormat.linePrefix($0, $1, prefix: "> ") } }
-                fmt("link", "Link") { controller.apply { FrameFormat.link($0, $1) } }
-                Divider().frame(height: 24)
-                PhotosPicker(selection: $imageItem, maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
-                    BarLabel(icon: "photo", text: "Image")
-                }
-                PhotosPicker(selection: $imagesItems, maxSelectionCount: 3, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
-                    BarLabel(icon: "photo.on.rectangle", text: "2–3 side by side")
-                }
-                PhotosPicker(selection: $clipItem, maxSelectionCount: 1, matching: .videos, preferredItemEncoding: .current, photoLibrary: .shared()) {
-                    BarLabel(icon: "film", text: "Clip")
-                }
-                Button { showYouTube = true } label: { BarLabel(icon: "play.rectangle", text: "YouTube") }
-                if model.busy { ProgressView().padding(.horizontal, 8) }
-            }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-        }
-    }
-
-    private func fmt(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).frame(width: 36, height: 32) }
-            .accessibilityLabel(label)
-    }
-
-    private func insert(_ block: String) {
-        if controller.isAttached {
-            controller.apply { FrameFormat.insertBlock($0, $1, block: block) }
-        } else {
-            model.draft.body = FrameFormat.insertBlock(model.draft.body, NSRange(location: (model.draft.body as NSString).length, length: 0), block: block).text
-        }
-    }
-
-    private func handle(_ items: [PhotosPickerItem], _ kind: PendingInsert.Kind, reset: @escaping () -> Void) {
+    private func handle(_ items: [PhotosPickerItem], _ kind: AddAction, reset: @escaping () -> Void) {
         guard !items.isEmpty else { return }
+        let at = insertIndex
         Task {
             model.busy = true
             defer { model.busy = false; reset() }
@@ -203,96 +392,15 @@ struct StoryBodyEditor: View {
                 model.error = "Pick 2 or 3 photos for a side-by-side row. The photo was added to the story's files; use Image to place it."
                 return
             }
-            pending = PendingInsert(kind: kind, names: names)
+            var b = EditorBlock(media: kind == .images ? .images : kind == .clip ? .clip : .image)
+            b.items = names.map { .init(name: $0, note: "") }
+            doc.insert(b, at: at)
+            editingID = b.id
         }
     }
 }
 
-private struct InsertDetailsSheet: View {
-    let pending: PendingInsert
-    let onInsert: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var notes: [String]
-    @State private var alt = ""
-    @State private var place = ""
-    @State private var full = false
-
-    init(pending: PendingInsert, onInsert: @escaping (String) -> Void) {
-        self.pending = pending
-        self.onInsert = onInsert
-        _notes = State(initialValue: Array(repeating: "", count: pending.names.count))
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                ForEach(Array(pending.names.enumerated()), id: \.offset) { i, n in
-                    Section(n) { TextField("Note (shown under it)", text: $notes[i], axis: .vertical) }
-                }
-                if pending.kind != .clip {
-                    Section {
-                        TextField("Alt text", text: $alt, axis: .vertical)
-                        if pending.kind == .image {
-                            TextField("Place (if different from the story)", text: $place)
-                            Toggle("Full-bleed (edge to edge)", isOn: $full)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Insert")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Insert") { onInsert(marker()); dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func marker() -> String {
-        switch pending.kind {
-        case .image:
-            return FrameFormat.imageMarker(name: pending.names[0], note: notes[0], alt: alt, place: place, full: full)
-        case .images:
-            return FrameFormat.imagesMarker(zip(pending.names, notes).map { ($0, $1) }, alt: alt)
-        case .clip:
-            return FrameFormat.clipMarker(name: pending.names[0], note: notes[0])
-        }
-    }
-}
-
-private struct YouTubeSheet: View {
-    let onInsert: (String, String) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var url = ""
-    @State private var title = ""
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("YouTube link") {
-                    TextField("https://youtu.be/…", text: $url)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    if !url.isEmpty && !FrameFormat.isYouTubeURL(url) {
-                        Text("Use a youtu.be, youtube.com/watch or shorts link.").font(.caption).foregroundStyle(.red)
-                    }
-                }
-                Section("Title (optional)") { TextField("Title", text: $title) }
-            }
-            .navigationTitle("YouTube")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Insert") { onInsert(url, title); dismiss() }.disabled(!FrameFormat.isYouTubeURL(url))
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-}
+// MARK: local (approximate) preview
 
 // MARK: preview
 
@@ -353,11 +461,3 @@ struct StoryPreview: View {
     }
 }
 
-private struct BarLabel: View {
-    let icon: String
-    let text: String
-    var body: some View {
-        Label(text, systemImage: icon).font(.footnote).padding(.horizontal, 8).padding(.vertical, 6)
-            .background(Color(.secondarySystemBackground), in: Capsule())
-    }
-}
