@@ -1,13 +1,28 @@
 import SwiftUI
 
 struct RootView: View {
-    var body: some View {
-        TabView {
-            StatusView().tabItem { Label("Status", systemImage: "waveform.path.ecg") }
-            LightsView().tabItem { Label("Lights", systemImage: "lightbulb") }
-            FramesView().tabItem { Label("Frames", systemImage: "photo.on.rectangle") }
-            SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
+    enum AppTab: Hashable { case status, lights, frames, settings }
+    @State private var tab: AppTab = RootView.initialTab
+
+    /// `-screen <name>` (demo/screenshots) can start on any tab.
+    private static var initialTab: AppTab {
+        switch DemoMode.screen {
+        case "lights": return .lights
+        case "frames", "story", "photo", "publish": return .frames
+        case "settings": return .settings
+        default: return .status
         }
-        .scrollDismissesKeyboard(.interactively)   // drag a list/form down to hide the keyboard too
+    }
+
+    var body: some View {
+        TabView(selection: $tab) {
+            Tab("Status", systemImage: "waveform.path.ecg", value: .status) { StatusView() }
+            Tab("Lights", systemImage: "lightbulb", value: .lights) { LightsView() }
+            Tab("Frames", systemImage: "photo.on.rectangle", value: .frames) { FramesView() }
+            Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsView() }
+        }
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .sensoryFeedback(.selection, trigger: tab)
+        .scrollDismissesKeyboard(.interactively)
     }
 }

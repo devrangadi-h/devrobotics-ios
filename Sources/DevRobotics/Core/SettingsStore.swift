@@ -9,6 +9,11 @@ final class SettingsStore {
     var token: String { didSet { Keychain.set(token, for: "token") } }
 
     init() {
+        if DemoMode.isOn {   // screenshots only: fake host/token, never persisted (didSet doesn't run in init)
+            host = DemoMode.host
+            token = "demo"
+            return
+        }
         host = UserDefaults.standard.string(forKey: "host") ?? ""
         token = Keychain.get("token") ?? ""
     }

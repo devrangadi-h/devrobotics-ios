@@ -15,10 +15,10 @@ struct ConnectionBanner: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(buttonTitle) { Self.openTailscale() }
                 .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
         }
         .padding(12)
-        .background(Theme.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .glassEffect(.regular.tint(Theme.warn.opacity(0.35)), in: .rect(cornerRadius: DS.Radius.control))
     }
 
     static func openTailscale() {

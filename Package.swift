@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "DevRobotics",
     platforms: [
-        .iOS(.v17),
+        .iOS("26.0"),
         .macOS(.v14),
     ],
     products: [

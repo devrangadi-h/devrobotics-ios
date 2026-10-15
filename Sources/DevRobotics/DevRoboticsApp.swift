@@ -7,6 +7,7 @@ struct DevRoboticsApp: App {
     init() {
         Theme.registerFonts()
         KeyboardDone.install()
+        DemoMode.installIfNeeded()
     }
 
     var body: some Scene {
