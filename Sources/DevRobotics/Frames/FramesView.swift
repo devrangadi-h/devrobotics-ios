@@ -80,7 +80,19 @@ struct FramesView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showPublish = true } label: { Label("Publish", systemImage: "paperplane") }
+                    Button { showPublish = true } label: {
+                        // Explicit icon + text: a plain Label is collapsed to icon-only inside toolbars.
+                        HStack(spacing: 6) {
+                            Image(systemName: "paperplane.fill")
+                            Text("Review & publish")
+                        }
+                        .font(Theme.font(15, weight: .semibold, relativeTo: .subheadline))
+                        .padding(.horizontal, 2)
+                    }
+                    .accessibilityLabel("Review and publish")
+                    .tint(Theme.accent)
+                    .accessibilityHint("Builds a preview of everything in your inbox and lets you approve it for the site")
+                    .sensoryFeedback(.impact(weight: .light), trigger: showPublish) { _, now in now }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
