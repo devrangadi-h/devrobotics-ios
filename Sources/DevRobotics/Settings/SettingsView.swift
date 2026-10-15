@@ -107,6 +107,20 @@ struct SettingsView: View {
                 cacheSection
 
                 Section {
+                    Picker(selection: $s.launchTab) {
+                        Text("Status").tag("status")
+                        Text("Lights").tag("lights")
+                        Text("Frames").tag("frames")
+                        Text("Settings").tag("settings")
+                    } label: { Label("Tab", systemImage: "rectangle.on.rectangle") }
+                    .pickerStyle(.menu)
+                } header: {
+                    Text("Open on launch")
+                } footer: {
+                    Text("The tab shown when the app starts.")
+                }
+
+                Section {
                     LabeledContent("Version", value: Self.versionString)
                 } footer: {
                     Text("Drafts are stored on this phone until you send them.")
