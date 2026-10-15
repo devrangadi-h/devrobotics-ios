@@ -84,7 +84,6 @@ struct DateRow: View {
             SetDateSheet(initial: StoryDates.initial(for: model)) { d in
                 model.draft.fields["date"] = StoryDates.fmt.string(from: d)
             }
-            .presentationDetents([.medium, .large])
         }
         if manual != nil {
             Button("Use the photo's date") { model.draft.fields["date"] = "" }.font(.footnote)
@@ -144,12 +143,13 @@ struct FocusImage: View {
 
 struct FilesSection: View {
     @Bindable var model: DraftEditorModel
+    @State private var fileToRemove: String?
     var body: some View {
         Section("Files in this story") {
             if model.draft.allFiles.isEmpty { Text("No files yet.").foregroundStyle(.secondary) }
             ForEach(model.draft.allFiles, id: \.self) { n in
                 HStack {
-                    FrameThumb(source: model.source(for: n)).frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    FrameThumb(source: model.source(for: n)).frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: DS.Radius.chip, style: .continuous))
                     VStack(alignment: .leading) {
                         Text(n).font(.callout).lineLimit(1)
                         Text(model.draft.localFiles.contains(n) ? "Not sent yet" : "On Polaris")
@@ -161,8 +161,17 @@ struct FilesSection: View {
                         Button("Set cover") { model.draft.fields["cover"] = n }.font(.caption).buttonStyle(.borderless)
                     }
                 }
-                .swipeActions { Button("Remove", role: .destructive) { model.remove(n) } }
+                .swipeActions { Button("Remove", role: .destructive) { fileToRemove = n } }
             }
+        }
+        .confirmationDialog("Remove this file?", isPresented: Binding(get: { fileToRemove != nil }, set: { if !$0 { fileToRemove = nil } }),
+                            titleVisibility: .visible) {
+            Button("Remove file", role: .destructive) {
+                if let n = fileToRemove { model.remove(n) }
+                fileToRemove = nil
+            }
+        } message: {
+            Text("\(fileToRemove ?? "The file") is removed from this story's files.")
         }
     }
 }

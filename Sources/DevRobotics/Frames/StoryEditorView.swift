@@ -52,6 +52,7 @@ struct StoryEditorView: View {
     @State private var detailsFocusDate = false
     @State private var showFullScreen = false
     @State private var deleteTarget: UUID?
+    @State private var fileToRemove: String?
     @State private var trimRequest: TrimRequest?
     @State private var keyboardUp = false
     @FocusState private var titleFocused: Bool
@@ -94,7 +95,7 @@ struct StoryEditorView: View {
                     if mode == .write, !unusedFiles.isEmpty {
                         UnusedMediaTray(model: model, names: unusedFiles,
                                         onInsert: { insertFile($0) },
-                                        onRemove: { model.remove($0) })
+                                        onRemove: { fileToRemove = $0 })
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     StoryFloatingBar(mode: $mode, onAdd: { add($0, at: doc.blocks.count) },
@@ -210,6 +211,15 @@ struct StoryEditorView: View {
         return (map, rest)
     }
 
+    /// Entry point for inline badges: destructive fixes ask first, like everywhere else.
+    private func request(_ fix: FrameProblem.Fix) {
+        switch fix {
+        case .removeFile(let n): fileToRemove = n
+        case .removeBlock(let id): deleteTarget = id
+        default: perform(fix)
+        }
+    }
+
     private func perform(_ fix: FrameProblem.Fix) {
         switch fix {
         case .setDate:
@@ -322,13 +332,11 @@ struct StoryEditorView: View {
                               }
                           },
                           onSelect: { p in pending = .select(p); showProblems = false })
-                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showSetDate) {
             SetDateSheet(initial: StoryDates.initial(for: model)) { d in
                 model.draft.fields["date"] = StoryDates.fmt.string(from: d)
             }
-            .presentationDetents([.medium, .large])
         }
         .fullScreenCover(isPresented: $showFullScreen) { FullScreenWriter(doc: doc) }
         .fullScreenCover(item: $trimRequest) { req in
@@ -357,6 +365,15 @@ struct StoryEditorView: View {
         } message: {
             Text("The file stays in the story's files unless you remove it too.")
         }
+        .confirmationDialog("Remove this file?", isPresented: Binding(get: { fileToRemove != nil }, set: { if !$0 { fileToRemove = nil } }),
+                            titleVisibility: .visible) {
+            Button("Remove file", role: .destructive) {
+                if let n = fileToRemove { model.remove(n) }
+                fileToRemove = nil
+            }
+        } message: {
+            Text("\(fileToRemove ?? "The file") is removed from this story's files.")
+        }
         .alert("Problem", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(model.error ?? "") }
@@ -379,7 +396,7 @@ struct StoryEditorView: View {
                     cover
                         .id("cover-top")
                         .padding(.bottom, DS.Space.s)
-                    ForEach(pm.general) { ProblemBadge(problem: $0, onFix: { perform($0) }) }
+                    ForEach(pm.general) { ProblemBadge(problem: $0, onFix: { request($0) }) }
                     ForEach(Array(doc.blocks.enumerated()), id: \.element.id) { idx, b in
                         addRow(at: idx)
                         BlockRow(block: b, model: model, doc: doc, problems: pm.byBlock[b.id] ?? [],
@@ -387,7 +404,7 @@ struct StoryEditorView: View {
                                  isFirst: idx == 0, isLast: idx == doc.blocks.count - 1,
                                  onEdit: { editingID = b.id },
                                  onDelete: { requestDelete(b) },
-                                 onFix: { perform($0) },
+                                 onFix: { request($0) },
                                  onDropFile: { insertFile($0, before: idx) })
                             .id(b.id)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -616,7 +633,7 @@ struct StoryPreview: View {
                 HStack(spacing: 6) {
                     ForEach(files, id: \.self) { n in
                         if model.draft.allFiles.contains(n) {
-                            FrameThumb(source: model.source(for: n)).frame(height: 160).clipShape(RoundedRectangle(cornerRadius: 4))
+                            FrameThumb(source: model.source(for: n)).frame(height: 160).clipShape(RoundedRectangle(cornerRadius: DS.Radius.chip, style: .continuous))
                         } else {
                             Label("\(n) missing", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
                         }

@@ -147,6 +147,7 @@ struct StoryFloatingBar: View {
         .padding(.horizontal, DS.Space.l)
         .padding(.bottom, DS.Space.s)
         .frame(height: StoryFloatingBar.height, alignment: .bottom)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)   // fixed-height floating chrome: cap so labels never truncate
         .dsAnimation(.dsSpring, value: collapsed)
     }
 

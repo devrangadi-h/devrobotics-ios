@@ -44,7 +44,7 @@ struct LinkSheet: View {
             .navigationTitle(isEditing ? "Edit link" : "Link")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onCancel() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { onCancel() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isEditing ? "Save" : "Add") {
                         if case .ok(let u) = result { onSave(text, u) }
@@ -53,6 +53,7 @@ struct LinkSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
         .onAppear { text = initialText; url = initialURL; touched = false }
     }
 }

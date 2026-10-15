@@ -35,7 +35,7 @@ struct PhotoFocusPicker: View {
         return ZStack {
             Path { p in p.addRect(CGRect(origin: .zero, size: size)); p.addRect(crop) }
                 .fill(.black.opacity(0.4), style: FillStyle(eoFill: true))
-            RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.9), lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: DS.Radius.chip, style: .continuous).stroke(.white.opacity(0.9), lineWidth: 1.5)
                 .frame(width: crop.width, height: crop.height).position(x: crop.midX, y: crop.midY)
             Crosshair(active: touching)
                 .position(x: f.x * size.width, y: f.y * size.height)

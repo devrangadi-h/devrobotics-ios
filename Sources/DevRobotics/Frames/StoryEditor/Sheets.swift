@@ -41,9 +41,10 @@ struct BlockDetailsSheet: View {
             }
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -68,7 +69,7 @@ struct YouTubeSheet: View {
             .navigationTitle("YouTube")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Insert") { onInsert(url.trimmingCharacters(in: .whitespaces), title); dismiss() }
                         .disabled(!FrameFormat.isYouTubeURL(url))
@@ -76,6 +77,7 @@ struct YouTubeSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -123,7 +125,7 @@ struct StoryDetailsSheet: View {
             .background { AppBackground() }
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
     }
 }
@@ -136,17 +138,17 @@ struct FullScreenWriter: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
+                LazyVStack(alignment: .leading, spacing: DS.Space.xs) {
                     ForEach(doc.blocks.filter { !$0.isMedia }) { b in
                         LiveTextView(text: doc.text(for: b.id))
                     }
                 }
-                .padding(.horizontal, 20).padding(.vertical, 12)
+                .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Writing")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
     }
 }

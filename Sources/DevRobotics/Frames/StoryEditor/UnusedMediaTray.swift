@@ -38,5 +38,6 @@ struct UnusedMediaTray: View {
         .padding(.vertical, DS.Space.s)
         .glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card))
         .padding(.horizontal, DS.Space.l)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)   // floating chrome over the editor: keep it compact
     }
 }

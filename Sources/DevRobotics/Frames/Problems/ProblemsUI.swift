@@ -32,6 +32,7 @@ struct ProblemsPill: View {
             }
         }
         .dsAnimation(value: problems.map(\.id))
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)   // floating chip: keep one line
     }
 }
 
@@ -40,6 +41,8 @@ struct ProblemsSheet: View {
     let problems: [FrameProblem]
     var onFix: (FrameProblem, FrameProblem.Fix) -> Void
     var onSelect: (FrameProblem) -> Void
+    @State private var confirmingFix: (FrameProblem, FrameProblem.Fix)?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -60,6 +63,14 @@ struct ProblemsSheet: View {
             .navigationTitle(problems.isEmpty ? "Problems" : problems.summaryText)
             .navigationBarTitleDisplayMode(.inline)
             .dsAnimation(value: problems.map(\.id))
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+        .confirmationDialog(confirmingFix.map { Self.confirmTitle($0.1) } ?? "", isPresented: Binding(get: { confirmingFix != nil }, set: { if !$0 { confirmingFix = nil } }),
+                            titleVisibility: .visible) {
+            Button(confirmingFix.map { Self.confirmButton($0.1) } ?? "Remove", role: .destructive) {
+                if let c = confirmingFix { onFix(c.0, c.1) }
+                confirmingFix = nil
+            }
         }
         .presentationDetents([.fraction(0.4), .large])
         .presentationDragIndicator(.visible)
@@ -91,7 +102,9 @@ struct ProblemsSheet: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: DS.Space.s) {
                         ForEach(Array(p.fixes.enumerated()), id: \.offset) { _, fix in
-                            Button(label(for: fix, file: p.fileName)) { onFix(p, fix) }
+                            Button(label(for: fix, file: p.fileName)) {
+                                if Self.isDestructive(fix) { confirmingFix = (p, fix) } else { onFix(p, fix) }
+                            }
                                 .buttonStyle(.glass)
                                 .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
                         }
@@ -104,6 +117,18 @@ struct ProblemsSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.control))
         .accessibilityElement(children: .contain)
+    }
+
+    private static func isDestructive(_ fix: FrameProblem.Fix) -> Bool {
+        switch fix { case .removeFile, .removeBlock: true; default: false }
+    }
+    private static func confirmTitle(_ fix: FrameProblem.Fix) -> String {
+        if case .removeBlock = fix { return "Delete this block?" }
+        return "Remove this file?"
+    }
+    private static func confirmButton(_ fix: FrameProblem.Fix) -> String {
+        if case .removeBlock = fix { return "Delete block" }
+        return "Remove file"
     }
 
     private func label(for fix: FrameProblem.Fix, file: String?) -> String {
@@ -132,23 +157,26 @@ struct SetDateSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: DS.Space.l) {
-            Text("Set a date").font(Theme.font(20, weight: .semibold, relativeTo: .title3))
-            DatePicker("Date", selection: $date, in: ...Date.distantFuture, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-            Button {
-                onSave(date)
-                dismiss()
-            } label: {
-                Text("Save")
+        NavigationStack {
+            VStack(spacing: DS.Space.l) {
+                DatePicker("Date", selection: $date, in: ...Date.distantFuture, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                Button {
+                    onSave(date)
+                    dismiss()
+                } label: {
+                    Text("Save")
+                }
+                .buttonStyle(.primaryAction)
             }
-            .buttonStyle(.primaryAction)
+            .padding(.horizontal, DS.Space.l)
+            .padding(.bottom, DS.Space.xl)
+            .frame(maxHeight: .infinity, alignment: .center)   // content centred in the sheet, no dead strip below
+            .navigationTitle("Set a date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
-        .padding(.horizontal, DS.Space.l)
-        .padding(.top, DS.Space.xl + DS.Space.s)   // clear the drag indicator
-        .padding(.bottom, DS.Space.xl)
-        .frame(maxHeight: .infinity, alignment: .center)   // content centred in the sheet, no dead strip below
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(.thickMaterial)            // legible over photos behind the sheet

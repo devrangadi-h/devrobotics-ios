@@ -40,23 +40,23 @@ struct DraftPreviewView: View {
         case .ready:
             EmptyView()
         case .failed(let msg):
-            VStack(spacing: 12) {
+            VStack(spacing: DS.Space.m) {
                 Image(systemName: "exclamationmark.triangle").font(.title)
                 Text(msg).multilineTextAlignment(.center)
                 if controller.needsConnection { ConnectionBanner() }
                 Button("Try again") { Task { await refresh(force: true) } }.buttonStyle(.primaryAction)
             }
-            .padding(20).glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card)).padding()
+            .padding(DS.Space.xl).glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card)).padding()
         }
     }
 
     private func progressCard(_ text: String) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: DS.Space.m) {
             ProgressView()
             Text(text)
-            Button("Cancel") { controller.cancel() }.buttonStyle(.bordered)
+            Button("Cancel") { controller.cancel() }.buttonStyle(.secondaryAction)
         }
-        .padding(20).glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card))
+        .padding(DS.Space.xl).glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card))
     }
 
     private var statusBar: some View {

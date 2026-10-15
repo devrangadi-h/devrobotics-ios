@@ -177,7 +177,7 @@ struct PublishView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(Self.tint(c.change))
                     .frame(width: 34, height: 34)
-                    .background(Self.tint(c.change).opacity(0.14), in: .rect(cornerRadius: 10))
+                    .background(Self.tint(c.change).opacity(0.14), in: .rect(cornerRadius: DS.Radius.chip))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(c.slug).font(Theme.font(16, weight: .medium)).lineLimit(1).truncationMode(.middle)
                     Text(c.kind == "photo" ? "Photo" : "Story")
@@ -365,8 +365,8 @@ private struct PublishWarningCard: View {
             }
             .padding(DS.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warn.opacity(0.16), in: .rect(cornerRadius: DS.Radius.control))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.control).strokeBorder(Theme.warn.opacity(0.4)))
+            .background(Theme.warn.opacity(0.16), in: RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous).strokeBorder(Theme.warn.opacity(0.4)))
         }
         .padding(.horizontal, DS.Space.l)
     }
