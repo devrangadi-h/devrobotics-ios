@@ -437,7 +437,8 @@ def put_entry(kind, slug):
         tmp.replace(folder / n)
     (folder / md_name).write_text(render_md(kind, meta.get("fields", {}), meta.get("body", "")))
     ok, lines = validate_inbox()
-    mine = [l for l in lines if f"/{slug}/" in l or f"{slug}/" in l]
+    prefix = f"{KINDS[kind][0]}/{slug}/"
+    mine = [l for l in lines if re.search(r"(?:^|\s)" + re.escape(prefix), l)]
     return jsonify({"ok": True, "valid": ok or not mine, "problems": mine})
 
 
