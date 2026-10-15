@@ -210,6 +210,8 @@ Tools/install.sh       # stamps build info, builds, signs, installs on a connect
 ```
 
 Install through `Tools/install.sh` so the About screen shows the build id, date and signing-expiry countdown.
+It also renders `Info.plist` from `Info.template.plist`: put your Mac's Tailscale address (one line) in
+`~/Library/Application Support/DevRobotics/mac-host` to enable "Reinstall from my Mac"; the address is never committed.
 Optional: `Tools/mac/install-mac-helpers.sh` sets up the launchd agents that reinstall automatically when the phone is
 plugged in (`Tools/mac/uninstall-mac-helpers.sh` removes them).
 

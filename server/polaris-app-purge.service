@@ -1,9 +1,10 @@
+# Replace USER with the service account's home directory name before installing.
 [Unit]
 Description=Polaris app cache purge (drafts, blobs, thumbnails)
 
 [Service]
 Type=oneshot
 User=polaris
-WorkingDirectory=/home/polaris/polaris-app
-ExecStart=/home/polaris/polaris/.venv/bin/python /home/polaris/polaris-app/polaris_app_api.py purge
+WorkingDirectory=/home/USER/polaris-app
+ExecStart=/home/USER/polaris/.venv/bin/python /home/USER/polaris-app/polaris_app_api.py purge
 Nice=10

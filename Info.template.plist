@@ -3,14 +3,16 @@
 <plist version="1.0">
 <dict>
     <!-- "Reinstall from my Mac" talks plain http to the Mac's Tailscale address (the link is encrypted by Tailscale).
-         Allow exactly that host instead of disabling App Transport Security. -->
+         Allow exactly that host instead of disabling App Transport Security.
+         Tools/install.sh renders this template to Info.plist (gitignored) using the address stored in
+         ~/Library/Application Support/DevRobotics/mac-host; with no such file the exception is omitted. -->
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
         <true/>
         <key>NSExceptionDomains</key>
         <dict>
-            <key>100.103.224.53</key>
+            <key>__MAC_HOST__</key>
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key>
                 <true/>

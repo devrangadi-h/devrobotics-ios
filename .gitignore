@@ -14,3 +14,6 @@ __pycache__/
 
 # Written by Tools/install.sh
 Sources/DevRobotics/Resources/BuildStamp.json
+
+# Rendered from Info.template.plist by Tools/install.sh (contains the Mac's address)
+/Info.plist

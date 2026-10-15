@@ -5,7 +5,7 @@ Free Apple IDs sign for 7 days. These two LaunchAgents keep the phone's copy fre
 | Agent | What it does |
 | --- | --- |
 | `dev.devrobotics.watcher` | Every 5 s checks for the iPhone on USB. On plug-in (debounced) it runs `Tools/install.sh` if the install is due. |
-| `dev.devrobotics.helper` | HTTP on the Mac's **Tailscale IPv4 only**, port 8766. The app's About > "Reinstall from my Mac" button talks to it. |
+| `dev.devrobotics.helper` | HTTP on the Mac's **Tailscale IPv4 only** (the address is read from `mac-host`, never committed). The app's About > "Reinstall from my Mac" button talks to it. |
 
 ## When the watcher installs
 On each plug-in, once, if any of: less than 24 h left on the recorded signing (`expiresAt` in

@@ -39,7 +39,7 @@ No IDs or keys are in this repo.
 ## Deploy (on the Pi)
 
 ```
-cd /home/polaris/polaris
+cd /home/USER/polaris
 cp lights_api.py lights_api.py.bak
 # create lamps.json from the current hardcoded IDs (the two "device" values in the .bak)
 python3 - <<'EOF'
@@ -59,7 +59,7 @@ curl -s -H "Authorization: Bearer $(cat ~/.config/polaris/lights_token)" 127.0.0
 ## Rollback
 
 ```
-cp /home/polaris/polaris/lights_api.py.bak /home/polaris/polaris/lights_api.py
+cp /home/USER/polaris/lights_api.py.bak /home/USER/polaris/lights_api.py
 sudo systemctl restart lights-api.service
 ```
 

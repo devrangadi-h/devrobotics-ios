@@ -1,3 +1,4 @@
+# Replace USER with the service account's home directory name before installing.
 [Unit]
 Description=Polaris app API (DevRobotics iPhone app backend)
 After=network.target
@@ -5,8 +6,8 @@ After=network.target
 [Service]
 Type=simple
 User=polaris
-WorkingDirectory=/home/polaris/polaris-app
-ExecStart=/home/polaris/polaris/.venv/bin/python /home/polaris/polaris-app/polaris_app_api.py
+WorkingDirectory=/home/USER/polaris-app
+ExecStart=/home/USER/polaris/.venv/bin/python /home/USER/polaris-app/polaris_app_api.py
 Restart=on-failure
 
 [Install]

@@ -12,6 +12,23 @@ cd "$(dirname "$0")/.."
 if [ "${DEVROBOTICS_AUTOUPDATE:-0}" = "1" ]; then
   git fetch --quiet origin main && git merge --ff-only --quiet origin/main || echo "warning: could not update to origin/main" >&2
 fi
+# Render Info.plist from the template. The Mac's Tailscale address lives outside the repo (public):
+# ~/Library/Application Support/DevRobotics/mac-host holds one line, e.g. 100.x.y.z. Without it the
+# ATS exception is dropped and only "Reinstall from my Mac" is unavailable.
+INFO_SUPPORT="${DEVROBOTICS_SUPPORT_DIR:-$HOME/Library/Application Support/DevRobotics}"
+MAC_HOST=""
+[ -f "$INFO_SUPPORT/mac-host" ] && MAC_HOST=$(tr -d '[:space:]' < "$INFO_SUPPORT/mac-host")
+python3 - "$MAC_HOST" <<'PY'
+import re, sys
+host = sys.argv[1]
+s = open("Info.template.plist").read()
+if host:
+    s = s.replace("__MAC_HOST__", host)
+else:
+    s = re.sub(r"\s*<key>NSExceptionDomains</key>\s*<dict>.*?</dict>\s*</dict>(?=\s*</dict>)", "", s, flags=re.S)
+open("Info.plist", "w").write(s)
+PY
+
 DRY=0; STAMP_ONLY=0; ARGS=()
 for a in "$@"; do
   case "$a" in
