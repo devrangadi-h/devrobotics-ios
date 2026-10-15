@@ -8,6 +8,9 @@ final class SettingsStore {
     var host: String { didSet { UserDefaults.standard.set(host, forKey: "host") } }
     var token: String { didSet { Keychain.set(token, for: "token") } }
 
+    /// The Mac that reinstalls this app (Tailscale IP, e.g. 100.64.0.7). Not secret; UserDefaults.
+    var macHost: String { didSet { UserDefaults.standard.set(macHost, forKey: "macHost") } }
+
     /// Tab opened at launch: "status" | "lights" | "frames" | "settings". Default "lights".
     var launchTab: String { didSet { UserDefaults.standard.set(launchTab, forKey: "launchTab") } }
 
@@ -26,9 +29,11 @@ final class SettingsStore {
         if DemoMode.isOn {   // screenshots only: fake host/token, never persisted (didSet doesn't run in init)
             host = DemoMode.host
             token = "demo"
+            macHost = DemoMode.host
             return
         }
         host = UserDefaults.standard.string(forKey: "host") ?? ""
+        macHost = UserDefaults.standard.string(forKey: "macHost") ?? ""
         token = Keychain.get("token") ?? ""
     }
 
@@ -37,6 +42,8 @@ final class SettingsStore {
     var lightsBase: URL? { URL(string: "https://\(host)") }
     /// polaris-app-api (Tailscale Serve, port 8443).
     var appBase: URL? { URL(string: "https://\(host):8443") }
+    /// devrobotics-helper on the Mac (plain http over the tailnet, port 8766).
+    var macBase: URL? { macHost.isEmpty ? nil : URL(string: "http://\(macHost):8766") }
 }
 
 enum Keychain {

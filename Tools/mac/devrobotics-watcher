@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Reinstalls DevRobotics on the iPhone when it is plugged in and the install is due. See Tools/mac/README.md.
+Env (tests only): DEVROBOTICS_IOREG_CMD, DEVROBOTICS_INSTALLER, DEVROBOTICS_POLL, DEVROBOTICS_COOLDOWN,
+DEVROBOTICS_NO_NOTIFY, DEVROBOTICS_NO_FETCH, DEVROBOTICS_ONCE, DEVROBOTICS_SUPPORT_DIR, DEVROBOTICS_LOG_DIR."""
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.dont_write_bytecode = True
+import drcommon as c
+
+POLL = float(os.environ.get("DEVROBOTICS_POLL", "5"))
+COOLDOWN = float(os.environ.get("DEVROBOTICS_COOLDOWN", str(30 * 60)))
+LOCKED_RETRY = float(os.environ.get("DEVROBOTICS_LOCKED_RETRY", "60"))
+WINDOW = 24 * 3600
+LOG = "watcher.log"
+
+
+def log(m):
+    c.log_line(LOG, m)
+
+
+def notify(msg):
+    log("notify: " + msg)
+    if os.environ.get("DEVROBOTICS_NO_NOTIFY"):
+        return
+    try:   # the message goes in as an argv item, never interpolated into the script
+        subprocess.run(["osascript", "-e", "on run argv", "-e",
+                        'display notification (item 1 of argv) with title "DevRobotics"', "-e", "end run", msg],
+                       timeout=10, capture_output=True)
+    except Exception:
+        pass
+
+
+def git(*a, timeout=60):
+    return subprocess.run(["git", "-C", str(c.REPO), *a], capture_output=True, text=True, timeout=timeout)
+
+
+def parse_iso(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def decide(now=None):
+    """Returns (install?, reason)."""
+    now = now or datetime.now(timezone.utc)
+    if c.FORCE_FILE.exists():
+        return True, "force file"
+    st = c.read_state()
+    if not st:
+        return True, "no install record"
+    try:
+        left = (parse_iso(st["expiresAt"]) - now).total_seconds()
+    except Exception:
+        return True, "unreadable install record"
+    if left < WINDOW:
+        return True, f"expires in {max(left, 0) / 3600:.1f} h"
+    if not os.environ.get("DEVROBOTICS_NO_FETCH"):
+        try:
+            git("fetch", "--quiet", "origin", "main", timeout=45)
+        except Exception as e:
+            log(f"fetch failed: {e}")
+    inst = str(st.get("commit", "")).replace("-dirty", "")
+    if inst:
+        r = git("rev-list", "--count", f"{inst}..origin/main")
+        if r.returncode == 0 and r.stdout.strip().isdigit() and int(r.stdout) > 0:
+            return True, f"origin/main is {int(r.stdout)} commit(s) ahead of {inst}"
+    return False, f"installed build is current ({left / 3600:.0f} h left)"
+
+
+def run_install():
+    """Returns (ok, reason, retry_soon)."""
+    p = subprocess.run([c.INSTALLER], capture_output=True, text=True, timeout=1800, cwd=str(c.REPO))
+    tail = (p.stdout + p.stderr).strip().splitlines()[-12:]
+    for l in tail:
+        log("install: " + l)
+    text = "\n".join(tail).lower()
+    if p.returncode == 0:
+        st = c.read_state() or {}
+        return True, f"build {st.get('build', '?')}", False
+    if any(k in text for k in ("locked", "passcode", "trust", "unlock")):
+        return False, "Unlock your iPhone", True
+    if "another install" in text:
+        return False, "another install is running", True
+    return False, (tail[-1] if tail else f"exit {p.returncode}")[:120], False
+
+
+def main():
+    log("watcher started")
+    connected_n = 0          # consecutive polls with the phone seen (debounce)
+    attempted = False        # one attempt per plug-in
+    cooldown_until = 0.0
+    retry_at = 0.0
+    while True:
+        if c.phone_connected():
+            connected_n += 1
+        else:
+            if connected_n:
+                log("phone unplugged")
+            connected_n, attempted = 0, False
+        if connected_n >= 2 and not attempted and time.time() >= max(cooldown_until, retry_at):
+            if c.lock_holder():
+                log("install already running, skipping")
+                attempted = True
+            else:
+                go, why = decide()
+                log(f"plug-in: install={go} ({why})")
+                if go:
+                    ok, reason, soon = run_install()
+                    if ok:
+                        c.FORCE_FILE.unlink(missing_ok=True)
+                        notify(f"DevRobotics installed: {reason}")
+                        attempted = True
+                    elif soon:
+                        notify(reason)
+                        retry_at = time.time() + LOCKED_RETRY   # never really started: retry while plugged in
+                    else:
+                        notify(f"Install failed: {reason}")
+                        attempted = True
+                        cooldown_until = time.time() + COOLDOWN
+                else:
+                    attempted = True
+        if os.environ.get("DEVROBOTICS_ONCE") and attempted:
+            return
+        time.sleep(POLL)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

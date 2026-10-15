@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Tiny HTTP helper so the DevRobotics iOS app can ask this Mac to reinstall it. See Tools/mac/README.md.
+Binds ONLY to the Mac's Tailscale IPv4 address, port 8766. Bearer token required on every route.
+Env (tests only): DEVROBOTICS_BIND_IP (skips tailscale), DEVROBOTICS_PORT, DEVROBOTICS_TOKEN_FILE,
+DEVROBOTICS_INSTALLER, DEVROBOTICS_IOREG_CMD, DEVROBOTICS_SUPPORT_DIR, DEVROBOTICS_LOG_DIR."""
+import collections
+import hmac
+import json
+import os
+import socket
+import subprocess
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.dont_write_bytecode = True
+import drcommon as c
+
+PORT = int(os.environ.get("DEVROBOTICS_PORT", "8766"))
+TOKEN_FILE = Path(os.environ.get("DEVROBOTICS_TOKEN_FILE", Path.home() / ".config/devrobotics/installer_token"))
+TAILSCALE = [os.environ.get("DEVROBOTICS_TAILSCALE", "tailscale"), "ip", "-4"]
+LOG = "helper.log"
+
+_lock = threading.Lock()
+_job = {"state": "idle", "startedAt": None, "finishedAt": None, "lines": collections.deque(maxlen=20)}
+
+
+def log(m):
+    c.log_line(LOG, m)
+
+
+def load_token():
+    try:
+        t = TOKEN_FILE.read_text().strip()
+        return t.encode() if t else None
+    except Exception:
+        return None
+
+
+def tailscale_ip():
+    ip = os.environ.get("DEVROBOTICS_BIND_IP")
+    if ip:
+        return ip
+    for exe in (TAILSCALE[0], "/Applications/Tailscale.app/Contents/MacOS/Tailscale"):
+        try:
+            out = subprocess.run([exe, *TAILSCALE[1:]], capture_output=True, text=True, timeout=10).stdout.split()
+            if out and out[0].startswith("100."):
+                return out[0]
+        except Exception:
+            continue
+    return None
+
+
+def _run_install():
+    try:
+        p = subprocess.Popen([c.INSTALLER], cwd=str(c.REPO), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, stdin=subprocess.DEVNULL)
+        for line in p.stdout:
+            line = line.rstrip()
+            if line:
+                with _lock:
+                    _job["lines"].append(line[:300])
+        rc = p.wait()
+    except Exception as e:
+        rc = -1
+        with _lock:
+            _job["lines"].append(f"could not start installer: {e}")
+    with _lock:
+        _job["state"] = "done" if rc == 0 else "failed"
+        _job["finishedAt"] = int(time.time())
+    log(f"install finished rc={rc}")
+
+
+def installer_busy():
+    return _job["state"] == "running" or c.lock_holder() is not None
+
+
+class H(BaseHTTPRequestHandler):
+    server_version = "devrobotics-helper"
+
+    def log_message(self, fmt, *a):   # never log headers/paths with credentials
+        log(f"{self.client_address[0]} {self.command} {self.path.split('?')[0]} -> {a[1] if len(a) > 1 else ''}")
+
+    def _send(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authed(self):
+        tok = load_token()
+        got = self.headers.get("Authorization", "")
+        if tok is None or not got.startswith("Bearer "):
+            return False
+        return hmac.compare_digest(got[7:].encode(), tok)
+
+    def _job_json(self):
+        with _lock:
+            return {"state": _job["state"], "logTail": list(_job["lines"]), "startedAt": _job["startedAt"],
+                    "finishedAt": _job["finishedAt"]}
+
+    def do_GET(self):
+        if not self._authed():
+            return self._send(401, {"error": "unauthorised"})
+        path = self.path.split("?")[0]
+        if path == "/v1/mac/status":
+            return self._send(200, {"phoneConnected": c.phone_connected(), "installRunning": installer_busy(),
+                                    "lastInstall": c.read_state(), "hostname": socket.gethostname()})
+        if path == "/v1/mac/install":
+            return self._send(200, self._job_json())
+        self._send(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self._authed():
+            return self._send(401, {"error": "unauthorised"})
+        if self.path.split("?")[0] != "/v1/mac/install":
+            return self._send(404, {"error": "not found"})
+        n = int(self.headers.get("Content-Length") or 0)
+        if n:
+            self.rfile.read(min(n, 65536))   # body is ignored: nothing from the client reaches a shell
+        with _lock:
+            if installer_busy():
+                return self._send(409, {"error": "an install is already running"})
+        if not c.phone_connected():
+            return self._send(412, {"error": "iPhone is not plugged in"})
+        with _lock:
+            if installer_busy():
+                return self._send(409, {"error": "an install is already running"})
+            _job.update(state="running", startedAt=int(time.time()), finishedAt=None)
+            _job["lines"].clear()
+        log("install requested from app")
+        threading.Thread(target=_run_install, daemon=True).start()
+        self._send(202, {"state": "running", "startedAt": _job["startedAt"]})
+
+
+def main():
+    if load_token() is None:
+        log(f"no token at {TOKEN_FILE}; refusing to start")
+        print("devrobotics-helper: no token file; run install-mac-helpers.sh", file=sys.stderr)
+        sys.exit(78)
+    ip = None
+    while ip is None:
+        ip = tailscale_ip()
+        if ip is None:
+            log("Tailscale not up yet; waiting")
+            time.sleep(10)
+    srv = ThreadingHTTPServer((ip, PORT), H)
+    srv.daemon_threads = True
+    log(f"listening on {ip}:{PORT}")
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
