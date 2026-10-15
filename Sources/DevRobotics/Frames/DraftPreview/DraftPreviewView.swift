@@ -44,9 +44,9 @@ struct DraftPreviewView: View {
                 Image(systemName: "exclamationmark.triangle").font(.title)
                 Text(msg).multilineTextAlignment(.center)
                 if controller.needsConnection { ConnectionBanner() }
-                Button("Try again") { Task { await refresh(force: true) } }.buttonStyle(.borderedProminent)
+                Button("Try again") { Task { await refresh(force: true) } }.buttonStyle(.primaryAction)
             }
-            .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14)).padding()
+            .padding(20).glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card)).padding()
         }
     }
 
@@ -56,7 +56,7 @@ struct DraftPreviewView: View {
             Text(text)
             Button("Cancel") { controller.cancel() }.buttonStyle(.bordered)
         }
-        .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(20).glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.card))
     }
 
     private var statusBar: some View {
@@ -72,8 +72,10 @@ struct DraftPreviewView: View {
             }
             .disabled(controller.isWorking)
         }
-        .font(.footnote)
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .font(Theme.font(13, weight: .medium, relativeTo: .footnote))
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.xs)
     }
 
     private func refresh(force: Bool) async {

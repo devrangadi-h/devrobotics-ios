@@ -35,6 +35,8 @@ struct StoryEditorView: View {
     @State private var showFullScreen = false
     @State private var deleteTarget: UUID?
     @State private var trimRequest: TrimRequest?
+    @State private var keyboardUp = false
+    @FocusState private var titleFocused: Bool
 
     init(model: DraftEditorModel) {
         self.model = model
@@ -46,14 +48,18 @@ struct StoryEditorView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 0) {
-            Picker("Mode", selection: $mode) {
-                Text("Write").tag(Mode.write)
-                Text("Preview").tag(Mode.preview)
-            }
-            .pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 8)
+        Group {
             if mode == .write { writeView } else { previewView }
         }
+        .background { AppBackground() }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !keyboardUp {
+                StoryFloatingBar(mode: $mode) { add($0, at: doc.blocks.count) }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .storyTracksKeyboard($keyboardUp)
+        .toolbarVisibility(.hidden, for: .tabBar)
     }
 
     private func lifecycle<V: View>(_ v: V) -> some View {
@@ -182,14 +188,7 @@ struct StoryEditorView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     issueBanner(proxy: proxy)
                     cover
-                    TextField("Title", text: model.binding("title", suggestsSlug: true))
-                        .font(.largeTitle.bold())
-                        .textInputAutocapitalization(.sentences).submitLabel(.done)
-                        .padding(.top, 8)
-                    Text(model.draft.field("place").isEmpty ? "Add a place in Details" : model.draft.field("place"))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .onTapGesture { detailsFocusDate = false; showDetails = true }
-                        .padding(.bottom, 8)
+                        .padding(.bottom, DS.Space.s)
                     ForEach(Array(doc.blocks.enumerated()), id: \.element.id) { idx, b in
                         addRow(at: idx)
                         BlockRow(block: b, model: model, doc: doc, issues: issues.byBlock[b.id] ?? [],
@@ -198,67 +197,62 @@ struct StoryEditorView: View {
                                  onDelete: { requestDelete(b) },
                                  onSetDate: { detailsFocusDate = true; showDetails = true })
                             .id(b.id)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
-                    addRow(at: doc.blocks.count, prominent: true)
                     footer
                 }
-                .padding(.horizontal, 16).padding(.bottom, 40)
+                .dsAnimation(.dsSpring, value: doc.blocks.map(\.id))
+                .padding(.horizontal, DS.Space.l).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
         }
     }
 
     @ViewBuilder private var cover: some View {
-        let c = model.draft.field("cover")
-        Button { showCoverPicker = true } label: {
-            if !c.isEmpty, model.draft.allFiles.contains(c) {
-                FrameThumb(source: model.source(for: c)).frame(height: 220).frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(alignment: .bottomTrailing) {
-                        Label("Replace", systemImage: "photo.badge.plus").font(.caption.bold())
-                            .padding(8).background(.ultraThinMaterial, in: Capsule()).padding(8)
-                    }
-            } else {
-                RoundedRectangle(cornerRadius: 12).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6]))
-                    .foregroundStyle(.secondary).frame(height: 140)
-                    .overlay { Label("Add cover photo", systemImage: "photo.badge.plus").foregroundStyle(.secondary) }
-            }
-        }
-        .buttonStyle(.plain)
-        if model.busy { ProgressView("Reading original…").font(.footnote) }
+        StoryCoverHero(model: model, title: titleBinding, titleFocus: $titleFocused,
+                       busy: model.busy,
+                       onPickCover: { showCoverPicker = true },
+                       onPlace: { detailsFocusDate = false; showDetails = true })
     }
 
-    private func addRow(at index: Int, prominent: Bool = false) -> some View {
+    /// Wrapping title: Return ends editing instead of inserting a newline (titles are single-line in the file).
+    private var titleBinding: Binding<String> {
+        let base = model.binding("title", suggestsSlug: true)
+        return Binding(get: { base.wrappedValue },
+                       set: { new in
+                           if new.contains("\n") {
+                               titleFocused = false
+                               base.wrappedValue = new.replacingOccurrences(of: "\n", with: " ")
+                                   .trimmingCharacters(in: .whitespaces)
+                           } else { base.wrappedValue = new }
+                       })
+    }
+
+    @ViewBuilder private func addRow(at index: Int) -> some View {
         AddMenu(onPick: { add($0, at: index) }) {
-            if prominent {
-                Label("Add", systemImage: "plus.circle.fill").font(.callout.bold())
-                    .frame(maxWidth: .infinity).padding(.vertical, 10)
-                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 10))
-            } else {
-                HStack(spacing: 8) {
-                    Rectangle().fill(Theme.border).frame(height: 1)
-                    Image(systemName: "plus.circle").foregroundStyle(.tertiary)
-                    Rectangle().fill(Theme.border).frame(height: 1)
-                }
-                .frame(height: 22).contentShape(Rectangle())
+            HStack(spacing: DS.Space.s) {
+                Capsule().fill(Theme.border).frame(height: 1)
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(.thinMaterial, in: .circle)
+                Capsule().fill(Theme.border).frame(height: 1)
             }
+            .frame(height: 28).contentShape(Rectangle())
         }
-        .padding(.top, prominent ? 12 : 0)
+        .accessibilityLabel("Add block here")
     }
 
     private var footer: some View {
-        let w = counts.words, m = counts.minutes
-        return VStack(alignment: .leading, spacing: 2) {
-            Text("\(w) words" + (m > 0 ? " · \(m) min read" : ""))
-            Text("Saved on this phone · \(model.draft.updatedAt.formatted(date: .omitted, time: .shortened))")
-        }
-        .task(id: model.draft.body) {
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            let blocks = doc.blocks
-            counts = (EditorBlocks.wordCount(blocks), EditorBlocks.readMinutes(blocks))
-        }
-        .font(.caption).foregroundStyle(.secondary).padding(.top, 16)
+        StoryFooterChip(words: counts.words, minutes: counts.minutes, savedAt: model.draft.updatedAt)
+            .task(id: model.draft.body) {
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled else { return }
+                let blocks = doc.blocks
+                counts = (EditorBlocks.wordCount(blocks), EditorBlocks.readMinutes(blocks))
+            }
+            .padding(.top, DS.Space.l)
     }
 
     @ViewBuilder private func issueBanner(proxy: ScrollViewProxy) -> some View {
@@ -274,11 +268,15 @@ struct StoryEditorView: View {
                 }
             } label: {
                 Label("\(issues.count) \(issues.count == 1 ? "problem" : "problems")", systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote.bold()).frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                    .font(Theme.font(13, weight: .semibold, relativeTo: .footnote))
                     .foregroundStyle(hasErr ? Color.red : Theme.warn)
-                    .background((hasErr ? Color.red : Theme.warn).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassEffect(.regular.tint((hasErr ? Color.red : Theme.warn).opacity(0.25)).interactive(),
+                                 in: .rect(cornerRadius: DS.Radius.control))
             }
             .buttonStyle(.plain)
+            .padding(.bottom, DS.Space.xs)
             ForEach(issueMap.unmapped) { IssueBadge(issue: $0) }
             if issues.contains(where: { $0.kind == .noDate }) {
                 Button("Set a date") { detailsFocusDate = true; showDetails = true }.font(.footnote.bold())
@@ -294,9 +292,11 @@ struct StoryEditorView: View {
                 Label("\(b.issues.count) \(b.issues.count == 1 ? "problem" : "problems") - fix them in Write",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote.bold()).foregroundStyle(Theme.warn)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                    .background(Theme.warn.opacity(0.12))
-                    .onTapGesture { mode = .write }
+                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassEffect(.regular.tint(Theme.warn.opacity(0.2)), in: .rect(cornerRadius: DS.Radius.control))
+                    .padding(.horizontal, DS.Space.l)
+                    .onTapGesture { withAnimation(.dsSpring) { mode = .write } }
             }
             if let b = bridge, b.unavailableReason == nil {
                 b.makePreviewView()
