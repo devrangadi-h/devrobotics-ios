@@ -40,4 +40,4 @@ handling, issue badge line mapping, `DraftPreviewView` web content (must keep mi
 ## Reviewing your work
 `Tools/screenshots.sh <simulator-udid>` builds for the simulator and saves every screen in light and dark to
 `/tmp/devrobotics-shots/<udid>/` using demo data (`-demo -screen <name>`). Read the PNGs. A passing build is not enough.
-Screens: status, lights, frames, settings, story, photo, publish. Animations/haptics can only be judged on a device.
+Screens: status, lights, frames, settings, story, photo, publish, storyproblems (story editor with sample problems). Animations/haptics can only be judged on a device.

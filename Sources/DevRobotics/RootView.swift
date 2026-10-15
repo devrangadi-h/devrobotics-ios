@@ -8,7 +8,7 @@ struct RootView: View {
     private static var initialTab: AppTab {
         switch DemoMode.screen {
         case "lights": return .lights
-        case "frames", "story", "photo", "publish": return .frames
+        case "frames", "story", "photo", "publish", "storyproblems": return .frames
         case "settings": return .settings
         default: return .status
         }

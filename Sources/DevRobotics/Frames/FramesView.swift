@@ -83,6 +83,7 @@ struct FramesView: View {
                     case "story": path.append(EditTarget(kind: .story, slug: "pumpkintime", draft: nil))
                     case "photo": path.append(EditTarget(kind: .photo, slug: "rainersky", draft: nil))
                     case "publish": showPublish = true
+                    case "storyproblems": path.append(EditTarget(kind: .story, slug: "problemstory", draft: nil))
                     default: break
                     }
                 }

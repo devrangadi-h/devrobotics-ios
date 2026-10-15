@@ -52,7 +52,8 @@ final class DemoURLProtocol: URLProtocol {
             return json(["usedBytes": 61_000_000, "capBytes": 2_147_483_648, "draftCount": 0,
                          "parts": ["drafts": 0, "blobs": 0, "thumbs": 700_000, "previewSite": 60_300_000]])
         case "/v1/frames/entries": return json(["entries": entries])
-        case "/v1/frames/preview", "/v1/frames/publish", "/v1/frames/draft-preview": return json(job(), status: 202)
+        case "/v1/frames/preview", "/v1/frames/publish": return json(job(), status: 202)
+        case "/v1/frames/draft-preview": return json(problemsJob(), status: 202)
         case "/api/lights/ping": return json(["ok": true])
         case "/api/lights/state":
             return json(["ok": true, "updatedAt": Int(Date().timeIntervalSince1970),
@@ -67,16 +68,33 @@ final class DemoURLProtocol: URLProtocol {
         if path.hasPrefix("/api/lights/") { return json(["ok": true, "responses": []]) }
         if parts.count == 4, parts[0] == "v1", parts[1] == "frames", var e = entries.first(where: { ($0["slug"] as? String) == parts[3] }) {
             if parts[3] == "pumpkintime" { e["body"] = sampleBody }
+            else if parts[3] == "problemstory" {
+                e["body"] = "A story used to test the problems UI.\n\n<insert image IMG_0101.HEIC \"A photo that is used\">\n\n<insert image MISSING_0042.HEIC \"A photo that is not in the story\">\n\nThe last paragraph."
+            }
             else { e["body"] = (e["fields"] as? [String: String])?["note"] ?? "A quiet moment worth keeping." }
             return json(e)
         }
-        if parts.count == 3, parts[1] == "jobs" { return json(job()) }
+        if parts.count == 3, parts[1] == "jobs" { return json(parts[2] == "demo-problems" ? problemsJob() : job()) }
         if parts.count == 6, parts[4] == "thumb" { return (200, "image/jpeg", thumb(seed: parts[3] + parts[5])) }
         if method == "DELETE" || method == "PUT" { return json(["ok": true, "valid": true, "problems": []]) }
         return json(["error": "demo: not found"], status: 404)
     }
 
     // MARK: fixtures (fake)
+
+    /// A finished draft-preview job that failed with typical pipeline issues (used by `-screen storyproblems`).
+    private static func problemsJob() -> [String: Any] {
+        ["id": "demo-problems", "kind": "draft-preview", "state": "failed", "started": Int(Date().timeIntervalSince1970) - 5,
+         "finished": Int(Date().timeIntervalSince1970), "log": ["ERROR: inbox has errors; fix them first"],
+         "result": ["error": "inbox has errors; fix them first", "bodyStartLine": 7,
+                    "issues": [
+                        ["level": "error", "line": 3, "file": "story.md", "kind": "no-date", "name": "IMG_0100.HEIC",
+                         "message": "the cover IMG_0100.HEIC has no date taken; add \"date: YYYY-MM-DD\" to the header"],
+                        ["level": "error", "line": 11, "file": "story.md", "kind": "missing-file", "name": "MISSING_0042.HEIC",
+                         "message": "MISSING_0042.HEIC is not in this story folder"],
+                        ["level": "warning", "line": NSNull(), "file": "IMG_9999.HEIC", "kind": "other", "name": "IMG_9999.HEIC",
+                         "message": "not used by any insert marker or cover (it will not be published)"]]]]
+    }
 
     /// An already-finished job (preview/publish/draft-preview) with a plausible change list.
     private static func job() -> [String: Any] {
@@ -115,6 +133,8 @@ final class DemoURLProtocol: URLProtocol {
     }
 
     private static var entries: [[String: Any]] { [
+        entry("story", "problemstory", ["title": "Sample with problems", "place": "Seattle, Washington", "cover": "IMG_0100.HEIC", "gps": "hide"],
+              ["IMG_0100.HEIC", "IMG_0101.HEIC", "IMG_9999.HEIC"]),
         entry("photo", "rainersky", ["place": "In flight, Mt. Rainier", "gps": "show", "alt": "Sky at dusk", "note": "When I see this beautiful mountain, I know I'm home"], ["IMG_7311.HEIC"]),
         entry("photo", "jaipurfort", ["place": "Amer Fort, Jaipur, India", "gps": "show", "alt": "Fort walls at golden hour"], ["IMG_6278.HEIC"]),
         entry("photo", "coloradostars", ["place": "Rocky Mountain National Park, Colorado", "gps": "hide", "alt": "Milky Way over a ridge"], ["IMG_0108.HEIC"]),
