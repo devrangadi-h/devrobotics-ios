@@ -526,6 +526,22 @@ def fan_snapshot():
             "minPercent": floor if floor else None}
 
 
+def fan_wait_spinup(timeout=3.0):
+    """Right after a hold is applied the tachometer reads 0 for a second or two. Wait (bounded) for a real
+    reading so the reply carries it instead of a misleading 0 RPM."""
+    h = fan_hwmon()
+    if not h:
+        return
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        try:
+            if int(read_text(h / "fan1_input").strip()) > 0:
+                return
+        except (ValueError, OSError):
+            return
+        time.sleep(0.25)
+
+
 def fan_watchdog():
     while True:
         time.sleep(FAN_TICK_S)
@@ -593,6 +609,8 @@ def fan_post():
         if not fan_apply_locked(temp):
             return err("fan helper failed; back on automatic", 503)
         fan_log(f"{mode} {percent}% for {minutes:g} min at {temp} C")
+    if percent > 0:
+        fan_wait_spinup()   # outside the lock: let the tach report a real RPM before we answer
     return jsonify(fan_snapshot())
 
 

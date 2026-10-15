@@ -22,6 +22,14 @@ final class FanModel {
     private(set) var phase: Phase = .loading
     private(set) var state: FanState?
     private(set) var busy = false
+    /// When the user last changed the fan. Used to say "Spinning up" instead of a misleading 0 RPM.
+    private(set) var changedAt: Date?
+
+    /// The fan was just told to run but the tachometer hasn't reported a speed yet.
+    func isSpinningUp(_ s: FanState) -> Bool {
+        guard s.isOverridden, (s.rpm ?? 0) == 0, let changedAt else { return false }
+        return Date().timeIntervalSince(changedAt) < 8
+    }
     /// Last error to show inline. Cleared by the next successful call.
     private(set) var message: String?
     /// Bumped on every accepted change / failure so views can trigger haptics.
@@ -60,6 +68,14 @@ final class FanModel {
             apply(try JSONDecoder().decode(FanState.self, from: data))
             message = nil
             successTick += 1
+            changedAt = Date()
+            // Don't wait for the next 5 s tick: look again soon so the RPM catches up with the spin-up.
+            Task { [weak self] in
+                for delay in [1.2, 2.0, 3.0] {
+                    try? await Task.sleep(for: .seconds(delay))
+                    await self?.refresh(settings: settings)
+                }
+            }
         } catch let APIError.http(code, _) where code == 409 {
             message = "Too hot to override the fan. It stays on automatic."
             errorTick += 1

@@ -91,15 +91,21 @@ struct FanCard: View {
         hint(s)
     }
 
+    /// Automatic mode below the first thermal trip (50 C): the Pi 5 fan is genuinely off, so 0 RPM is correct.
+    private func isIdle(_ s: FanState) -> Bool {
+        s.mode == "auto" && (s.rpm ?? 0) == 0
+    }
+
     private func readout(_ s: FanState) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DS.Space.l) {
             VStack(alignment: .leading, spacing: DS.Space.hair) {
-                Text(s.rpm.map { $0.formatted() } ?? "\u{2013}")
+                Text(model.isSpinningUp(s) ? "\u{2026}" : (isIdle(s) ? "Off" : (s.rpm.map { $0.formatted() } ?? "\u{2013}")))
                     .font(Theme.font(30, weight: .semibold, mono: true, relativeTo: .title))
                     .foregroundStyle(Theme.accent)
                     .contentTransition(.numericText())
                     .minimumScaleFactor(0.6).lineLimit(1)
-                Text("RPM").font(Theme.font(11, weight: .medium, relativeTo: .caption2)).foregroundStyle(.secondary)
+                Text(model.isSpinningUp(s) ? "Spinning up" : (isIdle(s) ? "Idle \u{00B7} starts at 50\u{00B0}C" : "RPM"))
+                    .font(Theme.font(11, weight: .medium, relativeTo: .caption2)).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: DS.Space.hair) {
                 Text(s.tempC.map { String(format: "%.1f\u{00B0}C", $0) } ?? "\u{2013}")
