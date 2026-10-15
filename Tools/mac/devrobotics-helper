@@ -97,7 +97,8 @@ class H(BaseHTTPRequestHandler):
         got = self.headers.get("Authorization", "")
         if tok is None or not got.startswith("Bearer "):
             return False
-        return hmac.compare_digest(got[7:].encode(), tok)
+        # Strip stray whitespace/newlines (pasted tokens often carry one), same as the Pi's servers do.
+        return hmac.compare_digest(got[7:].strip().encode(), tok)
 
     def _job_json(self):
         with _lock:

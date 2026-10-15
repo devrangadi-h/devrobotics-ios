@@ -48,10 +48,11 @@ final class ReinstallFromMacModel {
     var canInstall: Bool { reachable && status?.phoneConnected == true && !isRunning }
 
     private func send(_ settings: SettingsStore, _ path: String, method: String = "GET") async throws -> (Int, Data) {
-        guard let base = settings.macBase, !settings.token.isEmpty else { throw URLError(.badURL) }
+        let token = settings.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let base = settings.macBase, !token.isEmpty else { throw URLError(.badURL) }
         var req = URLRequest(url: base.appending(path: path), timeoutInterval: 6)
         req.httpMethod = method
-        req.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession.shared.data(for: req)
         return ((resp as? HTTPURLResponse)?.statusCode ?? 0, data)
     }
