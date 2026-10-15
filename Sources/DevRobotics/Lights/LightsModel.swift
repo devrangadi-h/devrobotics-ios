@@ -184,10 +184,15 @@ final class LightsModel {
     }
 
     func setPreset(_ api: API, _ name: String, label: String) {
-        send(api, "preset", ["value": name], label) {
+        let target = name == "bright_white_warm" ? 3000 : 6500
+        // Change colour temperature only. The legacy /preset route also forces brightness (warm 80%, cool 100%),
+        // so it is used just as a fallback for an older Pi.
+        let route = supports("colortemp") ? "colortemp" : "preset"
+        let body: [String: Any] = route == "colortemp" ? ["value": target] : ["value": name]
+        send(api, route, body, label) {
             self.preset = name; UserDefaults.standard.set(name, forKey: "lights.preset")
-            self.kelvin = name == "bright_white_warm" ? 3000 : 6500
-            let k = Int(self.kelvin)
+            self.kelvin = Double(target)
+            let k = target
             for i in self.lamps.indices { self.lamps[i].colorTempK = k; self.lamps[i].rgb = nil }
         }
     }
