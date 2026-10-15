@@ -535,7 +535,7 @@ def fan_wait_spinup(timeout=3.0):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         try:
-            if int(read_text(h / "fan1_input").strip()) > 0:
+            if int(read_text(h / "fan1_input").strip()) >= 400:   # past the first tach ticks: a real, settling reading
                 return
         except (ValueError, OSError):
             return
