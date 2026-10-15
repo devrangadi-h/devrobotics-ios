@@ -23,6 +23,7 @@ struct AboutView: View {
                     .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
 
                 expirySection
+                ReinstallFromMacSection()
                 groupSection(model.appGroup)
                 groupSection(model.deviceGroup)
                 piSection

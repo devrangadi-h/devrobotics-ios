@@ -48,6 +48,18 @@ final class DemoURLProtocol: URLProtocol {
     static func respond(path: String, method: String, body: Data? = nil) -> (Int, String, Data) {
         let parts = path.split(separator: "/").map(String.init)
         switch path {
+        case "/v1/mac/status":
+            return json(["phoneConnected": true, "installRunning": ProcessInfo.processInfo.arguments.contains("-macRunning"), "hostname": "Hardiks-MacBook-Pro",
+                         "lastInstall": ["build": "71", "commit": "43d017a", "builtAt": "2026-10-13T18:02:11Z",
+                                         "expiresAt": "2026-10-20T18:04:40Z"]])
+        case "/v1/mac/install":
+            if method == "POST" { return json(["state": "running", "startedAt": Int(Date().timeIntervalSince1970)], status: 202) }
+            if ProcessInfo.processInfo.arguments.contains("-macRunning") {
+                return json(["state": "running", "startedAt": Int(Date().timeIntervalSince1970) - 20,
+                             "logTail": ["Stamped: 1.0.0 · build 71 · 43d017a", "Building for iOS arm64", "Linking DevRobotics",
+                                         "Signing with team ABCDE12345", "Installing to iPhone"]])
+            }
+            return json(["state": "idle", "logTail": [] as [String]])
         case "/v1/fan": return fan(method: method, body: body)
         case "/v1/status": return json(status())
         case "/v1/cache", "/v1/cache/clear":
