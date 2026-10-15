@@ -48,7 +48,7 @@ final class DemoURLProtocol: URLProtocol {
         let parts = path.split(separator: "/").map(String.init)
         switch path {
         case "/v1/status": return json(status())
-        case "/v1/cache":
+        case "/v1/cache", "/v1/cache/clear":
             return json(["usedBytes": 61_000_000, "capBytes": 2_147_483_648, "draftCount": 0,
                          "parts": ["drafts": 0, "blobs": 0, "thumbs": 700_000, "previewSite": 60_300_000]])
         case "/v1/frames/entries": return json(["entries": entries])

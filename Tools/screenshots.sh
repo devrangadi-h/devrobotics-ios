@@ -31,7 +31,7 @@ for mode in light dark; do
   for s in "${SCREENS[@]}"; do
     xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
     xcrun simctl launch "$UDID" "$BUNDLE" -demo -screen "$s" >/dev/null
-    sleep 7
+    sleep 14
     xcrun simctl io "$UDID" screenshot "$OUT/$s-$mode.png" >/dev/null 2>&1
   done
 done
