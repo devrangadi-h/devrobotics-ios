@@ -70,6 +70,7 @@ final class ReinstallFromMacModel {
             }
             status = s
             if problem == .unreachable || problem == .notConfigured || problem == .unauthorised { problem = nil }
+            if case .other(let m)? = problem, m.hasPrefix("Can't reach the Mac") { problem = nil }
             if s.installRunning || job?.state == "running" {
                 let was = job?.state
                 if let (c2, d2) = try? await send(settings, "v1/mac/install"), c2 == 200,
@@ -81,7 +82,10 @@ final class ReinstallFromMacModel {
             }
         } catch {
             status = nil
-            problem = .unreachable
+            // Show the real error code so a blocked or unreachable connection can be told apart
+            // (-1022 transport security, -1001 timed out, -1004 could not connect, -1009 offline).
+            let code = (error as? URLError)?.code.rawValue ?? (error as NSError).code
+            problem = .other("Can't reach the Mac (error \(code)). Check it is awake and on Tailscale, the helper is running, and the address is its 100.x IP.")
         }
     }
 

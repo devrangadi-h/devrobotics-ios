@@ -1,3 +1,4 @@
 version: 1
 bundleID: com.hardik.devrobotics
 iconPath: Resources/AppIcon.png
+infoPath: Info.plist
