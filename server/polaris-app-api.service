@@ -1,0 +1,13 @@
+[Unit]
+Description=Polaris app API (DevRobotics iPhone app backend)
+After=network.target
+
+[Service]
+Type=simple
+User=polaris
+WorkingDirectory=/home/polaris/polaris-app
+ExecStart=/home/polaris/polaris/.venv/bin/python /home/polaris/polaris-app/polaris_app_api.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
