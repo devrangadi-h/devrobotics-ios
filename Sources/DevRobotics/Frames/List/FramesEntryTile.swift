@@ -6,6 +6,7 @@ struct FramesEntryTile: View {
     let row: FrameRow
     let model: FramesModel
     var compact: Bool
+    var wide = false
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: compact ? DS.Radius.control : DS.Radius.card, style: .continuous)
@@ -13,7 +14,7 @@ struct FramesEntryTile: View {
 
     var body: some View {
         Color.clear
-            .aspectRatio(compact ? 1 : 1.8, contentMode: .fit)
+            .aspectRatio(wide ? 2 : compact ? 1 : 1.8, contentMode: .fit)
             .overlay {
                 FrameThumb(source: model.thumbSource(for: row.draft, remote: row.remote, kind: row.kind, slug: row.slug))
             }
@@ -35,7 +36,11 @@ struct FramesEntryTile: View {
     private var statusBadges: [Badge] {
         var out: [Badge] = []
         if let d = row.draft {
-            if d.lastError != nil {
+            let errors = row.draft.map { model.blockingErrors(for: $0).count } ?? 0
+            if errors > 0 {
+                out.append(Badge(text: "\(errors) \(errors == 1 ? "error" : "errors")",
+                                 icon: "exclamationmark.octagon.fill", red: true))
+            } else if d.lastError != nil {
                 out.append(Badge(text: "Failed", icon: "exclamationmark.triangle.fill", red: true))
             } else if !d.problems.isEmpty {
                 out.append(Badge(text: "\(d.problems.count) problem\(d.problems.count == 1 ? "" : "s")",

@@ -17,12 +17,25 @@ private enum FramesFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// Consecutive photos are laid out two-up; stories get a full-width card.
+enum FramesViewMode: String, CaseIterable, Identifiable {
+    case tidy = "Tidy", chronological = "Chronological", recent = "Recently edited"
+    var id: String { rawValue }
+    var icon: String {
+        switch self { case .tidy: "square.grid.2x2"; case .chronological: "calendar"; case .recent: "clock.arrow.circlepath" }
+    }
+}
+
+/// A laid-out grid item: a full-width story, two photos side by side, or one photo spanning the row.
 private enum FramesBlock: Identifiable {
     case story(FrameRow)
-    case photos([FrameRow])
+    case photos(FrameRow, FrameRow)
+    case wide(FrameRow)
     var id: String {
-        switch self { case .story(let r): r.id; case .photos(let rs): "p-" + rs.map(\.id).joined(separator: "|") }
+        switch self {
+        case .story(let r): r.id
+        case .photos(let a, let b): "p-\(a.id)|\(b.id)"
+        case .wide(let r): "w-\(r.id)"
+        }
     }
 }
 
@@ -33,6 +46,8 @@ struct FramesView: View {
     @State private var showPublish = false
     @State private var toDelete: FrameRow?
     @State private var filter: FramesFilter = .all
+    @AppStorage("frames.viewMode") private var modeRaw = FramesViewMode.tidy.rawValue
+    private var mode: FramesViewMode { FramesViewMode(rawValue: modeRaw) ?? .tidy }
     @Namespace private var zoomNS
 
     var body: some View {
@@ -69,6 +84,14 @@ struct FramesView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Picker("View", selection: $modeRaw) {
+                            ForEach(FramesViewMode.allCases) { m in Label(m.rawValue, systemImage: m.icon).tag(m.rawValue) }
+                        }
+                    } label: { Image(systemName: mode.icon) }
+                    .accessibilityLabel("View mode")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
                         Button("New photo", systemImage: "photo") { newEntry(.photo) }
                         Button("New story", systemImage: "book") { newEntry(.story) }
                     } label: { Image(systemName: "plus") }
@@ -97,6 +120,8 @@ struct FramesView: View {
                 }
             }
             .dsAnimation(value: model.pendingDrafts.isEmpty && !model.sending)
+            .dsAnimation(value: modeRaw)
+            .sensoryFeedback(.selection, trigger: modeRaw)
             .sensoryFeedback(.success, trigger: model.sending) { old, new in old && !new }
             .sheet(isPresented: $showPublish, onDismiss: { model.summary = nil; Task { await model.refresh(settings) } }) {
                 PublishView()
@@ -114,18 +139,38 @@ struct FramesView: View {
 
     // MARK: Content
 
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private func modified(_ r: FrameRow) -> Double {
+        r.draft?.updatedAt.timeIntervalSince1970 ?? Double(r.remote?.modified ?? 0)
+    }
+
+    /// Date taken (the `date` field) else the entry's modified time; drafts fall back to their local updatedAt.
+    private func chronological(_ r: FrameRow) -> Double {
+        let f = r.draft?.fields ?? r.remote?.fields ?? [:]
+        if let s = f["date"], let d = Self.dayFormatter.date(from: s) { return d.timeIntervalSince1970 }
+        return modified(r)
+    }
+
     private var blocks: [FramesBlock] {
-        var out: [FramesBlock] = []
-        var run: [FrameRow] = []
-        for r in model.rows where filter.includes(r.kind) {
-            if r.kind == .photo { run.append(r) }
-            else {
-                if !run.isEmpty { out.append(.photos(run)); run = [] }
-                out.append(.story(r))
+        var items = model.rows.filter { filter.includes($0.kind) }
+        switch mode {
+        case .tidy, .recent: items.sort { modified($0) > modified($1) }
+        case .chronological: items.sort { chronological($0) > chronological($1) }
+        }
+        let slots = FramesLayoutPacker.pack(isPhoto: items.map { $0.kind == .photo }, pullForward: mode == .tidy)
+        return slots.map { slot in
+            switch slot {
+            case .story(let i): .story(items[i])
+            case .pair(let a, let b): .photos(items[a], items[b])
+            case .wide(let i): .wide(items[i])
             }
         }
-        if !run.isEmpty { out.append(.photos(run)) }
-        return out
     }
 
     @ViewBuilder private var content: some View {
@@ -137,21 +182,23 @@ struct FramesView: View {
                 switch block {
                 case .story(let r):
                     tile(r, compact: false)
-                case .photos(let rs):
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.m), GridItem(.flexible(), spacing: DS.Space.m)],
-                              spacing: DS.Space.m) {
-                        ForEach(rs) { tile($0, compact: true) }
+                case .photos(let a, let b):
+                    HStack(spacing: DS.Space.m) {
+                        tile(a, compact: true)
+                        tile(b, compact: true)
                     }
+                case .wide(let r):
+                    tile(r, compact: true, wide: true)
                 }
             }
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
         }
     }
 
-    private func tile(_ row: FrameRow, compact: Bool) -> some View {
+    private func tile(_ row: FrameRow, compact: Bool, wide: Bool = false) -> some View {
         let radius = compact ? DS.Radius.control : DS.Radius.card
         return Button { open(row) } label: {
-            FramesEntryTile(row: row, model: model, compact: compact)
+            FramesEntryTile(row: row, model: model, compact: compact, wide: wide)
         }
         .buttonStyle(.pressable)
         .matchedTransitionSource(id: row.id, in: zoomNS) {
