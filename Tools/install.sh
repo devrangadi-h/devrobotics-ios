@@ -73,6 +73,12 @@ echo "Stamped: $VERSION · build $BUILD · $COMMIT · $BUILT"
 EXPIRES=$(date -u -v+7d +%Y-%m-%dT%H:%M:%SZ)
 RECORD="{\"build\":\"$BUILD\",\"commit\":\"$COMMIT\",\"builtAt\":\"$BUILT\",\"expiresAt\":\"$EXPIRES\"}"
 XTOOL="${DEVROBOTICS_XTOOL:-xtool}"
+# The phone can be listed twice (USB and network) and xtool then asks "Choose device", which fails with no terminal.
+# Default to the cable unless the caller picked a transport or device.
+case " ${ARGS[*]} " in
+  *" --usb "*|*" --network "*|*" --all "*|*" --udid "*|*" -u "*|*" run "*|*" generate-xcode-project "*|*" build "*) ;;
+  *) ARGS=(run --usb "${ARGS[@]}") ;;
+esac
 
 if [ "$DRY" = 1 ]; then
   echo "dry-run: would run: $XTOOL dev ${ARGS[*]}"
