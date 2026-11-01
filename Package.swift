@@ -19,7 +19,11 @@ let package = Package(
     targets: [
         .target(
             name: "DevRobotics",
-            resources: [.process("Resources")]
+            resources: [.process("Resources")],
+            // Swift 6 mode adds a runtime main-actor assertion to SwiftUI's view closures. On iOS 27 SwiftUI sometimes
+            // evaluates `DevRoboticsApp.body` on its AsyncRenderer thread, and the assertion then kills the app at
+            // launch (EXC_BREAKPOINT in swift_task_isCurrentExecutor). Swift 5 mode keeps the code identical without it.
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )
